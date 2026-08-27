@@ -14,7 +14,7 @@ const G = {
   cam: { x: 0, y: 12, z: 12, tx: 0, ty: 1, tz: 0 },
   zone: null, lastZone: -1,
   inRaid: null, raidStage: 0, raidT: 0,
-  deathT: 0, resT: 0,
+  deathT: 0, resT: 0, victoryT: 0,
   toastQ: [],
 };
 
@@ -121,10 +121,14 @@ function styleFromGear(e, gear, clsId) {
   const best = bestTierOf(gear);
   const rg = rarityGlow(best);
   const chest = gear.chest, wpn = gear.weapon;
-  const ct = chest ? chest.t : 0;
-  const base = RARITY[ct] ? hexToRgb(RARITY[ct].c) : [.5, .5, .5];
-  e.gearCol = [lerp(c.col[0], base[0], .42), lerp(c.col[1], base[1], .42), lerp(c.col[2], base[2], .42)];
-  e.gearCol2 = [e.gearCol[0] * .62, e.gearCol[1] * .62, e.gearCol[2] * .68];
+  // With armour on, the torso takes the rarity colour tinted by class. With
+  // nothing equipped you wear plain travelling clothes, not bare skin.
+  const base = chest ? hexToRgb(RARITY[chest.t].c) : [.40, .34, .26];
+  const t = chest ? .45 : .82;
+  e.gearCol = [lerp(c.col[0], base[0], t), lerp(c.col[1], base[1], t), lerp(c.col[2], base[2], t)];
+  e.gearCol2 = gear.legs
+    ? [e.gearCol[0] * .62, e.gearCol[1] * .62, e.gearCol[2] * .68]
+    : [.29, .24, .19];
   e.accent = c.col.slice();
   e.glow = rg.g; e.glowCol = rg.c;
   e.helm = !!gear.head; e.pads = !!gear.shoulder; e.cape = !!gear.back;
@@ -227,11 +231,11 @@ function makePlayer(name, clsId) {
     quests: [], done: {}, doneCount: 0, kills: 0, deaths: 0, bossKills: 0, raidKills: 0,
     guild: null, respect: 0, playtime: 0, mythic: 0,
     stats: { dmgDone: 0, dmgTaken: 0, healed: 0, goldEarned: 0, itemsFound: 0, questsDone: 0, bossesKilled: 0, raidsDone: 0, pvpWins: 0, distance: 0 },
-    autoOn: false, autoMode: 'all', dead: 0, sprint: 1, swim: 0,
+    autoOn: false, autoMode: 'all', dead: 0, sprint: 1, swim: 0, fill: 0.07,
     lastTownVisit: 0, seenZones: {}, af: {},
   };
   const hub = POI.hubs[0];
-  p.x = hub.x + 6; p.z = hub.z + 8; p.y = groundH(p.x, p.z);
+  p.x = hub.x + 40; p.z = hub.z + 34; p.y = groundH(p.x, p.z);
   // starter kit: a plain weapon so the first swing feels like something
   const rng = new RNG(SEED ^ 0x51A27);
   p.gear.weapon = genItem(rng, 3, 0, 'weapon', clsId);
@@ -283,9 +287,11 @@ function moveEntity(e, wishX, wishZ, speed, dt, isPlayer) {
     let nx = wishX / wl, nz = wishZ / wl;
     const step = speed * dt;
     let tx = e.x + nx * step, tz = e.z + nz * step;
-    // slope rejection: refuse to climb near-vertical faces
+    // slope rejection: small rises are always steppable, steeper ground is
+    // judged by gradient so the limit does not change with frame rate
     const th = groundH(tx, tz);
-    if (th - groundH(e.x, e.z) > step * 2.4 + 0.55) {
+    const rise = th - groundH(e.x, e.z);
+    if (rise > 0.62 && rise / Math.max(step, 1e-4) > 1.7) {
       // slide along the contour instead of stopping dead
       const sx = -nz, sz = nx;
       const s1 = groundH(e.x + sx * step, e.z + sz * step);
@@ -318,7 +324,9 @@ function dmgNumber(x, y, z, val, kind) {
   G.dmg.push({ x, y, z, v: val, k: kind, t: 0, ox: (Math.random() - .5) * .8 });
   if (G.dmg.length > 60) G.dmg.shift();
 }
-function dealDamage(src, tgt, amount, kind, noText) {
+/** `splash` marks a secondary hit: it must not re-trigger cleave, or the
+    affix recurses into itself forever. */
+function dealDamage(src, tgt, amount, kind, noText, splash) {
   if (!tgt || tgt.dead) return 0;
   const p = G.player;
   let dmg = amount;
@@ -336,11 +344,14 @@ function dealDamage(src, tgt, amount, kind, noText) {
   if (src === p) {
     p.stats.dmgDone += dmg;
     if (p.st.leechP > 0) healEntity(p, dmg * p.st.leechP, true);
-    if ((p.af.burn || 0)) addDot(tgt, dmg * p.af.burn * .01 / 4, 4, p);
-    if ((p.af.cleave || 0)) {
+    if ((p.af.burn || 0) && !splash) addDot(tgt, dmg * p.af.burn * .01 / 4, 4, p);
+    if ((p.af.cleave || 0) && !splash) {
+      let hit = 0;
       for (const o of G.ents) {
         if (o === tgt || !o.isMob || o.dead) continue;
-        if (V.dist2(o.x, o.z, tgt.x, tgt.z) < 25) dealDamage(src, o, dmg * p.af.cleave * .01, null, true);
+        if (V.dist2(o.x, o.z, tgt.x, tgt.z) > 25) continue;
+        dealDamage(src, o, dmg * p.af.cleave * .01, null, true, true);
+        if (++hit >= 6) break;
       }
     }
     if (tgt.hp <= 0) onMobKilled(tgt, p);
@@ -661,7 +672,8 @@ function killPlayer(p) {
 }
 function revivePlayer(p) {
   const hub = nearestPOI(p.x, p.z, 'hubs') || POI.hubs[0];
-  p.x = hub.x + (Math.random() - .5) * 10; p.z = hub.z + (Math.random() - .5) * 10;
+  const ra = Math.random() * TAU;
+  p.x = hub.x + Math.cos(ra) * 46; p.z = hub.z + Math.sin(ra) * 46;
   p.y = groundH(p.x, p.z);
   p.dead = 0; p.an.dead = 0; p.hp = p.st.hpMax; p.safeT = 5;
   p.res = CLASS_BY[p.cls].res === 'rage' ? 0 : p.resMax;
@@ -713,7 +725,17 @@ function updateMob(e, dt, p) {
       faceToward(e, p.x, p.z, dt, 30);
       const dmg = mobDamage(e, p) * (0.85 + Math.random() * 0.3) * (e.enraged ? 1.7 : 1);
       applyDamageToPlayer(p, dmg, e);
-      sfx('swing', .5, .7);
+      sfx(e.ranged ? 'cast' : 'swing', .5, .7);
+      if (e.ranged) {
+        // a visible tracer so ranged attacks are readable, not invisible chip damage
+        const sy = e.y + 1.3 * (e.scale || 1);
+        const dx = p.x - e.x, dy = (p.y + 1.2) - sy, dz = p.z - e.z;
+        for (let k = 0; k < 7; k++) {
+          const t2 = k / 7;
+          spawnPart(e.x + dx * t2, sy + dy * t2, e.z + dz * t2, 0, 0, 0, .22 + t2 * .12, .16,
+            .95, .55, .30, .9, 1, 0, 0);
+        }
+      }
     }
     faceToward(e, p.x, p.z, dt, 8);
   } else if (e.st === 'return') {
@@ -815,7 +837,7 @@ function applyDamageToPlayer(p, amount, src) {
   dmgNumber(p.x, p.y + 2.2, p.z, dmg, 'in');
   R.dmgVig = Math.min(1, R.dmgVig + dmg / p.st.hpMax * 1.6);
   R.camShake = Math.min(.6, R.camShake + dmg / p.st.hpMax * 1.2);
-  if ((p.af.thorns || 0) && src && src.isMob) dealDamage(p, src, dmg * p.af.thorns * .01, null, true);
+  if ((p.af.thorns || 0) && src && src.isMob) dealDamage(p, src, dmg * p.af.thorns * .01, null, true, true);
   if (CLASS_BY[p.cls].res === 'rage') p.res = Math.min(p.resMax, p.res + 8);
   G.combat = 6;
   if (p.hp <= 0) killPlayer(p);
@@ -902,6 +924,7 @@ function updateAIAvatar(e, dt, p) {
 
 /* ------------------------------ SPAWNING ------------------------------ */
 const MAX_MOBS = 44, MAX_AI = 34;
+const NEARBY_AI = [];
 function updateSpawns(dt, p) {
   G.spawnT -= dt;
   if (G.spawnT > 0) return;
@@ -958,19 +981,65 @@ function updateSpawns(dt, p) {
     if (!exists) spawnBoss(bd);
   }
   // ---- visible AI adventurers ----
-  if (ROSTER.length) {
-    let guard = 0;
-    while (ais < MAX_AI && guard++ < 40) {
-      const rec = ROSTER[(Math.random() * ROSTER.length) | 0];
-      if (rec.av || rec.dead) continue;
-      const d = V.dist(rec.x, rec.z, p.x, p.z);
-      if (d > 170 || d < 6) continue;
+  // Random sampling misses when few of the 1000 are nearby, so build the
+  // in-range shortlist first and draw from that.
+  if (ROSTER.length && ais < MAX_AI) {
+    NEARBY_AI.length = 0;
+    for (let i = 0; i < ROSTER.length; i++) {
+      const rec = ROSTER[i];
+      if (rec.av) continue;
+      const d2 = V.dist2(rec.x, rec.z, p.x, p.z);
+      if (d2 > 175 * 175 || d2 < 36) continue;
+      NEARBY_AI.push(rec);
+      if (NEARBY_AI.length >= 120) break;
+    }
+    while (ais < MAX_AI && NEARBY_AI.length) {
+      const k = (Math.random() * NEARBY_AI.length) | 0;
+      const rec = NEARBY_AI[k];
+      NEARBY_AI[k] = NEARBY_AI[NEARBY_AI.length - 1]; NEARBY_AI.pop();
       spawnAIAvatar(rec); ais++;
+    }
+    // if the neighbourhood is genuinely empty, pull a few travellers this way
+    if (ais < 8) {
+      let moved = 0;
+      for (let i = 0; i < ROSTER.length && moved < 12; i++) {
+        const rec = ROSTER[(i * 37 + (R.frame | 0)) % ROSTER.length];
+        if (rec.av) continue;
+        const zn = zoneAt(p.x, p.z);
+        if (!zn || Math.abs(rec.lv - (zn.lvMin + zn.lvMax) / 2) > 45) continue;
+        const a = Math.random() * TAU, r = 90 + Math.random() * 70;
+        rec.x = clamp(p.x + Math.cos(a) * r, -WORLD_HALF + 30, WORLD_HALF - 30);
+        rec.z = clamp(p.z + Math.sin(a) * r, -WORLD_HALF + 30, WORLD_HALF - 30);
+        rec.tx = p.x + Math.cos(a + 2) * 40; rec.tz = p.z + Math.sin(a + 2) * 40;
+        moved++;
+      }
     }
   }
 }
 
 /* ------------------------------ CAMERA ------------------------------ */
+/** Is this camera sample buried in solid geometry? */
+function cameraBlocked(x, y, z) {
+  for (const hub of POI.hubs) {
+    if (V.dist2(x, z, hub.x, hub.z) > 110 * 110) continue;
+    for (const b of hub.bld) {
+      const gy = groundH(b.x, b.z);
+      if (y > gy + b.hgt + 1.4) continue;
+      const rr = Math.max(b.w, b.d) * 0.56 + 0.5;
+      if (V.dist2(x, z, b.x, b.z) < rr * rr) return true;
+    }
+  }
+  const cx = Math.floor(x / CHUNK), cz = Math.floor(z / CHUNK);
+  for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+    const c = getChunkProps(cx + i, cz + j);
+    for (let t = 0; t < c.trees.length; t++) {
+      const tr = c.trees[t];
+      const rr = tr.rad * 0.6 + 0.35;
+      if (V.dist2(x, z, tr.x, tr.z) < rr * rr && y < tr.y + 3.4 * tr.s) return true;
+    }
+  }
+  return false;
+}
 function updateCamera(dt, p) {
   const c = G.cam;
   const tgtY = p.y + 1.55 * (p.scale || 1);
@@ -980,11 +1049,13 @@ function updateCamera(dt, p) {
   const ox = Math.sin(yaw) * Math.cos(pitch), oz = Math.cos(yaw) * Math.cos(pitch), oy = Math.sin(pitch);
   // pull the camera in when terrain would clip it
   let dsafe = dist;
-  for (let s = 0.25; s <= 1.0; s += 0.15) {
+  for (let s = 0.44; s <= 1.0; s += 0.12) {
     const tx = p.x - ox * dist * s, tz = p.z - oz * dist * s, ty = tgtY + oy * dist * s;
     const gh = groundH(tx, tz) + 0.9;
-    if (ty < gh) { dsafe = Math.min(dsafe, dist * s * 0.92); }
+    if (ty < gh) { dsafe = Math.min(dsafe, dist * s * 0.92); break; }
+    if (cameraBlocked(tx, ty, tz)) { dsafe = Math.min(dsafe, dist * s * 0.80); break; }
   }
+  dsafe = Math.max(dsafe, 3.4);
   const shake = G.camShake;
   const sx = shake ? (Math.random() - .5) * shake * .7 : 0;
   const sy = shake ? (Math.random() - .5) * shake * .7 : 0;
@@ -1157,7 +1228,8 @@ function updateWorld(dt) {
   // music director
   const boss = G.ents.find(e => e.kind === 'boss' && e.st === 'chase' && !e.dead);
   let want = 'explore';
-  if (G.inRaid) want = 'raid';
+  if (G.victoryT > 0) { G.victoryT -= dt; want = 'victory'; }
+  else if (G.inRaid) want = 'raid';
   else if (boss) want = 'boss';
   else if (G.combat > 0) want = 'combat';
   else if (p.inTown) want = 'town';

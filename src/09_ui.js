@@ -38,6 +38,14 @@ function chatPush(kind, text) {
   c.scrollTop = c.scrollHeight;
 }
 
+let _onceT = 0;
+/** Rate-limited system chatter, so repeated auto-play decisions do not spam. */
+function chatPushOnce(text) {
+  if (G.t - _onceT < 20) return;
+  _onceT = G.t;
+  chatPush('sys', text);
+}
+
 /* ------------------------------ TOOLTIP ------------------------------ */
 function itemTooltipHTML(it, cmp) {
   if (!it) return '';

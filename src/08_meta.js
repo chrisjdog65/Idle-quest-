@@ -29,6 +29,7 @@ const AI_STATES = [
   { k: 'travel', n: 'travelling', w: 4, xp: 0.30, gold: 0.3, q: 0, poi: 'hubs' },
 ];
 const AI_W = AI_STATES.map(s => s.w);
+const AI_STATE_BY = {}; AI_STATES.forEach(s => AI_STATE_BY[s.k] = s);
 
 /* Deliberately the same shape as the player's own kills-per-level curve, so a
    player who leaves Auto Quest running is genuinely competitive with the field
@@ -127,7 +128,7 @@ function advanceRec(rec, dt, fast) {
     }
     if (best) { rec.tx = best.x + _mrng.r(-18, 18); rec.tz = best.z + _mrng.r(-18, 18); rec.z2 = best.zone; }
   }
-  const S = AI_STATES.find(s => s.k === rec.st) || AI_STATES[0];
+  const S = AI_STATE_BY[rec.st] || AI_STATES[0];
   const eff = rec.skill * (0.72 + Math.min(1.0, rec.gs / Math.max(1, refPrimary(rec.lv) * 5.2)) * 0.55) * S.xp;
   rec.lp += levelRate(rec.lv, eff) * dt;
   while (rec.lp >= 1) { rec.lp -= 1; rec.lv++; }
@@ -221,7 +222,7 @@ function metaTick(dt) {
 function metaOffline(ms) {
   const secs = Math.min(ms / 1000, SEASON_MS / 1000);
   if (secs < 5) return null;
-  const step = secs > 3600 ? 240 : 30;
+  const step = secs > 86400 ? 600 : secs > 3600 ? 240 : 30;
   const n = Math.min(Math.ceil(secs / step), 4200);
   const realStep = secs / n;
   for (let s = 0; s < n; s++) {
@@ -310,11 +311,17 @@ const OFFERS = [];
 function makeIncomingOffer() {
   const p = G.player;
   if (!p || !p.bags.length) return;
-  const idx = (Math.random() * p.bags.length) | 0;
+  // offer on the best thing in the bag, and shop around for a buyer who can pay
+  let idx = 0;
+  for (let i = 1; i < p.bags.length; i++) if (p.bags[i].val > p.bags[idx].val) idx = i;
   const it = p.bags[idx];
   if (it.t < 1) return;
-  const buyer = ROSTER[(Math.random() * ROSTER.length) | 0];
-  if (!buyer || buyer.gold < it.val) return;
+  let buyer = null;
+  for (let t = 0; t < 12; t++) {
+    const c = ROSTER[(Math.random() * ROSTER.length) | 0];
+    if (c && c.gold >= it.val * 1.2) { buyer = c; break; }
+  }
+  if (!buyer) return;
   const price = Math.round(it.val * (1.15 + Math.random() * 0.9));
   const o = { uid: it.u, price, buyer: buyer.n, bid: buyer.i, t: Date.now(), id: (Math.random() * 1e9) | 0 };
   OFFERS.unshift(o);
@@ -335,6 +342,7 @@ function acceptOffer(oid) {
   giveGold(p, o.price);
   const b = ROSTER[o.bid]; if (b) b.gold = Math.max(0, b.gold - o.price);
   OFFERS.splice(oi, 1);
+  p.stats.offersTaken = (p.stats.offersTaken || 0) + 1;
   sfx('coin', 1);
   chatPush('trade', 'You sold [' + it.n + '] to ' + o.buyer + ' for ' + fmt(o.price) + 'g');
   return true;
@@ -425,7 +433,7 @@ function startRaid(rid) {
   const p = G.player, r = DB.raids[rid];
   const err = raidAvailable(r);
   if (err) { toast(err, 'sys'); sfx('error', .7); return false; }
-  G.inRaid = { r, boss: 0, hp: 0, t: 0, killed: 0, loot: [] };
+  G.inRaid = { r, boss: 0, hp: 0, t: 0, killed: 0, loot: [], cur: null, nextT: 0 };
   RAID_LOCK[r.id] = Date.now() + r.lock;
   panelClose();
   banner(r.n, r.size + '-player raid · ' + r.bosses.length + ' encounters');
@@ -455,6 +463,8 @@ function finishRaid(cleared) {
   const R2 = G.inRaid; if (!R2) return;
   const p = G.player, r = R2.r;
   G.inRaid = null;
+  AUTO.lastRaid = AUTO.t;
+  AUTO.goalKind = ''; AUTO.committed = 0; AUTO.thinkT = 0;
   if (cleared) {
     p.stats.raidsDone++; p.raidKills += r.bosses.length;
     const gold = giveGold(p, r.gold * (1 + p.level * .05));
@@ -466,23 +476,30 @@ function finishRaid(cleared) {
     banner('RAID CLEARED', r.n + ' · +' + fmt(gold) + 'g · +' + r.respect + ' respect');
     chatPush('world', '🏆 ' + p.name + '\'s group cleared ' + r.n + '!');
     musicSet('victory');
-    setTimeout(() => { if (!G.inRaid) musicSet('explore'); }, 16000);
+    G.musicState = 'victory';
+    G.victoryT = 16;
   } else {
     banner('RAID FAILED', r.n);
     chatPush('guild', 'The raid wiped in ' + r.n + '.');
   }
 }
+/* Encounter pacing runs on game time, not setTimeout: background tabs throttle
+   timers, and a raid must not stall halfway through because of it. */
 function raidTick(dt) {
   const R2 = G.inRaid; if (!R2) return;
   R2.t += dt;
   const p = G.player;
   if (p.dead) { finishRaid(false); return; }
   if (R2.cur && R2.cur.dead) {
-    R2.boss++; R2.killed++; R2.cur = null;
-    if (R2.boss >= R2.r.bosses.length) finishRaid(true);
-    else setTimeout(() => { if (G.inRaid) raidNextBoss(); }, 2600);
+    R2.boss++; R2.killed++; R2.cur = null; R2.nextT = 2.6;
+    if (R2.boss >= R2.r.bosses.length) { finishRaid(true); return; }
   }
-  if (R2.cur && V.dist(p.x, p.z, R2.r.x, R2.r.zz) > 190) { finishRaid(false); }
+  if (!R2.cur) {
+    R2.nextT = (R2.nextT || 0) - dt;
+    if (R2.nextT <= 0) raidNextBoss();
+    return;
+  }
+  if (V.dist(p.x, p.z, R2.r.x, R2.r.zz) > 190) finishRaid(false);
 }
 
 /* ------------------------------ QUESTS ------------------------------ */
@@ -596,8 +613,11 @@ function playerAsRecord() {
     title: '', isPlayer: true, x: p.x, z: p.z,
   };
 }
+/* Level first, then gear, then the rest — "highest level, best gear, best
+   overall stats", in that order. */
 function hofScore(r) {
-  return r.lv * 1000 + r.gs * 0.55 + r.best * 4200 + r.bosses * 24 + r.raids * 180 + r.quests * 6 + r.respect * 0.6;
+  return r.lv * 10000 + r.gs * 1.15 + r.best * 9000 +
+    r.bosses * 40 + r.raids * 220 + r.quests * 8 + r.respect * 0.5;
 }
 function hallOfFame(limit) {
   const all = ROSTER.slice();

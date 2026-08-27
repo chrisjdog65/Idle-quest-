@@ -142,11 +142,15 @@ function playerOffline(ms) {
       p.stats.itemsFound++;
       p.st = calcStats(p);
     }
-    if (rng.f() < 0.012 * realStep * EFF) { p.doneCount++; p.stats.questsDone++; }
-    if (rng.f() < 0.0016 * realStep * EFF) { p.bossKills++; p.stats.bossesKilled++; }
-    if (rng.f() < 0.0004 * realStep * EFF) { p.stats.raidsDone++; }
+    p.doneCount += 0.055 * realStep * EFF * 0.34;
+    p.bossKills += 0.010 * realStep * EFF * 0.11;
+    p.stats.raidsDone += 0.0042 * realStep * EFF * 0.09;
+    p.respect += 0.06 * (1 + p.level / 90) * realStep * EFF;
   }
   p.gold = Math.round(p.gold);
+  p.doneCount = Math.round(p.doneCount); p.bossKills = Math.round(p.bossKills);
+  p.stats.raidsDone = Math.round(p.stats.raidsDone);
+  p.stats.questsDone = p.doneCount; p.stats.bossesKilled = p.bossKills;
   p.st = calcStats(p); p.resMax = resourceMax(p); p.hp = p.st.hpMax;
   styleFromGear(p, p.gear, p.cls);
   return {

@@ -10,14 +10,35 @@ const AUTO = {
   act: 'idle', actLabel: 'Idle',
   t: 0, houseT: 0, thinkT: 0, stuckT: 0, lastPos: [0, 0], repathT: 0,
   raidT: 0, sessionXp: 0, sessionGold: 0, sessionItems: 0, sessionKills: 0,
+  avoid: new Map(),          // entity id -> time until we stop running from it
+  blocked: new Map(),        // 'raid:3' / 'boss:12' -> time until we retry it
+  lastRaid: -1e9, committed: 0,
+  travelT: 0, bestD: 1e9, noProg: 0,
 
   reset() {
     this.goal = null; this.goalKind = ''; this.act = 'idle';
     this.thinkT = 0; this.houseT = 0; this.stuckT = 0; this.repathT = 0;
+    this.avoid.clear(); this.blocked.clear(); this.committed = 0;
+    this.travelT = 0; this.bestD = 1e9; this.noProg = 0;
   },
-  setGoal(x, z, kind, name) {
+  /** rough seconds to kill — used to refuse fights we cannot win */
+  ttk(p, e) {
+    const dps = Math.max(1, p.st.dps);
+    return e.hp / dps;
+  },
+  setGoal(x, z, kind, name, tag) {
     this.goal = [x, z]; this.goalKind = kind || 'travel'; this.goalName = name || '';
-    this.repathT = 0;
+    this.repathT = 0; this.goalTag = tag || '';
+    this.travelT = 0; this.bestD = 1e9; this.noProg = 0;
+  },
+  isBlocked(tag) { const t = this.blocked.get(tag); return t != null && t > this.t; },
+  /** Abandon a destination we have failed to reach and stop choosing it. */
+  abandonGoal(p, why) {
+    if (this.goalTag) this.blocked.set(this.goalTag, this.t + 600);
+    if (this.goalKind === 'raid') this.lastRaid = this.t;
+    chatPushOnce('Cannot get there — ' + why + '. Finding something else to do.');
+    this.goal = null; this.goalKind = ''; this.goalTag = '';
+    this.committed = 0; this.thinkT = 0;
   },
   setGoalZone(zid) {
     const z = DB.zones[zid];
@@ -79,8 +100,24 @@ const AUTO = {
       INPUT.mx = INPUT.mz = 0; return;
     }
 
+    /* ---- raid night: check before combat, or we never stop killing trash ---- */
+    if (!G.inRaid && this.goalKind !== 'raid' && (this.t - this.lastRaid) > 220) this.tryRaid(p);
+
+    /* ---- bail out of a fight we are clearly losing ---- */
+    const cur = G.target;
+    if (cur && !cur.dead && cur.isMob) {
+      const mine = p.hp / p.st.hpMax, theirs = cur.hp / cur.hpMax;
+      if (mine < 0.30 && theirs > 0.55) {
+        this.avoid.set(cur.id, this.t + 90);
+        G.target = null;
+        this.thinkT = 0;
+        chatPushOnce('That one is out of our league — disengaging.');
+      }
+    }
+
     /* ---- fight anything that is already on us, or worth walking to ---- */
-    let foe = (G.target && !G.target.dead && V.dist(p.x, p.z, G.target.x, G.target.z) < 90) ? G.target : null;
+    let foe = (G.target && !G.target.dead && !this.isAvoided(G.target) &&
+      V.dist(p.x, p.z, G.target.x, G.target.z) < 90) ? G.target : null;
     if (!foe) foe = this.pickFoe(p);
     if (foe) { G.target = foe; this.fight(dt, p, foe); return; }
 
@@ -92,22 +129,50 @@ const AUTO = {
 
   /* Choose something to kill. Mobs spawn in a ring around the player, so the
      agent has to be willing to walk to them rather than wait to be attacked. */
+  isAvoided(e) { const t = this.avoid.get(e.id); return t != null && t > this.t; },
+  /** Commit to the best raid we are eligible for. Returns true if we took one. */
+  tryRaid(p) {
+    const mode = p.autoMode || 'all';
+    if (mode !== 'all' && mode !== 'raid') return false;
+    // a raid has to be worth the walk: the range we will travel grows with level
+    const reach = 380 + p.level * 7;
+    const ready = DB.raids.filter(r => !raidAvailable(r) && r.lv <= p.level && r.lv >= p.level - 40
+      && !this.isBlocked('raid:' + r.id) && V.dist2(p.x, p.z, r.x, r.zz) < reach * reach);
+    if (!ready.length) { this.lastRaid = this.t - 120; return false; }   // re-check soon
+    ready.sort((a, b) => (V.dist2(p.x, p.z, a.x, a.zz) - V.dist2(p.x, p.z, b.x, b.zz)) * 0.00002 + (b.lv - a.lv));
+    const r = ready[0];
+    if (V.dist(p.x, p.z, r.x, r.zz) < 14) { this.lastRaid = this.t; startRaid(r.id); return true; }
+    this.setGoal(r.x, r.zz, 'raid', r.n, 'raid:' + r.id);
+    this.act = 'raid'; this.actLabel = 'Travelling to raid'; this.committed = 1;
+    return true;
+  },
   pickFoe(p) {
     let best = null, bs = -1e9;
+    // while travelling to a raid or a named boss, only stop for things hitting us
+    // only a raid march ignores the world — boss hunts still clear quest mobs
+    const onObjective = this.goalKind === 'raid' && this.committed;
     for (const e of G.ents) {
       if (!e.isMob || e.dead) continue;
+      if (this.isAvoided(e)) continue;
       const d = V.dist(p.x, p.z, e.x, e.z);
       if (d > 130) continue;
-      const attacking = e.st === 'chase';
+      const attacking = e.st === 'chase' && d < 30;
       const wanted = this.isWantedTarget(p, e);
-      // never pick a fight far above our weight unless it is the stated goal
+      // a raid march does not detour, but it will not walk past a quest kill
+      if (onObjective && !attacking && !(wanted && d < 26)) continue;
       const overLevel = e.level - p.level;
-      if (!attacking && overLevel > (e.kind === 'boss' ? 2 : 6) && this.goalKind !== 'boss') continue;
+      // refuse anything that would take longer to kill than we can survive
+      if (!attacking) {
+        if (overLevel > (e.kind === 'boss' ? 2 : 6) && this.goalKind !== 'boss') continue;
+        const ttk = this.ttk(p, e);
+        const cap = e.kind === 'boss' ? 150 : e.rank === 1 ? 55 : 30;
+        if (ttk > cap) continue;
+      }
       let sc = -d * 0.05;
       if (attacking) sc += 60;
       if (wanted) sc += 40;
-      if (e.kind === 'boss') sc += (this.goalKind === 'boss' ? 80 : -25);
-      if (e.rank === 1) sc += 8;
+      if (e.kind === 'boss') sc += (this.goalKind === 'boss' ? 90 : -25);
+      if (e.rank === 1) sc += (p.level > 10 ? 8 : -20);
       if (sc > bs) { bs = sc; best = e; }
     }
     return bs > -1e8 ? best : null;
@@ -129,26 +194,31 @@ const AUTO = {
 
   chooseGoal(p) {
     const mode = p.autoMode || 'all';
-    // 1) a raid we can enter, if that is the mode or we are geared for it
+    this.committed = 0;
+    // 1) a raid we can enter — raid night comes around on a timer, not a coin flip
     if (mode === 'all' || mode === 'raid') {
-      const ready = DB.raids.filter(r => !raidAvailable(r) && r.lv <= p.level && r.lv >= p.level - 30);
-      if (ready.length && (mode === 'raid' || Math.random() < 0.30)) {
+      const reach = 380 + p.level * 7;
+      const ready = DB.raids.filter(r => !raidAvailable(r) && r.lv <= p.level && r.lv >= p.level - 40
+        && !this.isBlocked('raid:' + r.id) && V.dist2(p.x, p.z, r.x, r.zz) < reach * reach);
+      const due = mode === 'raid' || (this.t - this.lastRaid) > 220;
+      if (ready.length && due) {
         ready.sort((a, b) => b.lv - a.lv);
         const r = ready[0];
         const d = V.dist(p.x, p.z, r.x, r.zz);
-        if (d < 14) { startRaid(r.id); return; }
-        this.setGoal(r.x, r.zz, 'raid', r.n);
-        this.act = 'raid'; this.actLabel = 'Travelling to raid'; return;
+        if (d < 14) { this.lastRaid = this.t; startRaid(r.id); return; }
+        this.setGoal(r.x, r.zz, 'raid', r.n, 'raid:' + r.id);
+        this.act = 'raid'; this.actLabel = 'Travelling to raid'; this.committed = 1; return;
       }
     }
     // 2) an appropriate world boss
     if (mode === 'all' || mode === 'boss') {
-      const cands = DB.bosses.filter(b => b.lv <= p.level + 2 && b.lv >= p.level - 26 && (BOSS_STATE[b.id] || 0) <= G.t);
+      const cands = DB.bosses.filter(b => b.lv <= p.level + 2 && b.lv >= p.level - 26
+        && (BOSS_STATE[b.id] || 0) <= G.t && !this.isBlocked('boss:' + b.id));
       if (cands.length && (mode === 'boss' || Math.random() < 0.26)) {
         cands.sort((a, b) => V.dist2(p.x, p.z, a.x, a.z2) - V.dist2(p.x, p.z, b.x, b.z2));
         const b = cands[(Math.random() * Math.min(3, cands.length)) | 0];
-        this.setGoal(b.x, b.z2, 'boss', b.n + ', ' + b.t);
-        this.act = 'boss'; this.actLabel = 'Hunting a world boss'; return;
+        this.setGoal(b.x, b.z2, 'boss', b.n + ', ' + b.t, 'boss:' + b.id);
+        this.act = 'boss'; this.actLabel = 'Hunting a world boss'; this.committed = 1; return;
       }
     }
     // 3) the nearest unfinished quest objective
@@ -172,7 +242,7 @@ const AUTO = {
         if (d < bd) { bd = d; best = { tx, tz, q }; }
       }
       if (best) {
-        this.setGoal(best.tx, best.tz, 'quest', best.q.n);
+        this.setGoal(best.tx, best.tz, 'quest', best.q.n, 'quest:' + best.q.id);
         this.act = 'quest'; this.actLabel = 'Questing'; return;
       }
     }
@@ -183,7 +253,7 @@ const AUTO = {
     });
     const pool = camps.length ? camps : POI.camps;
     const c = pool[(Math.random() * pool.length) | 0];
-    this.setGoal(c.x, c.z, 'grind', c.n);
+    this.setGoal(c.x, c.z, 'grind', c.n, 'camp:' + POI.camps.indexOf(c));
     this.act = 'grind'; this.actLabel = 'Grinding';
   },
 
@@ -194,7 +264,8 @@ const AUTO = {
     if (d < (this.goalKind === 'grind' || this.goalKind === 'quest' ? 16 : 9)) {
       if (this.goalKind === 'raid') {
         const r = DB.raids.find(r2 => Math.abs(r2.x - gx) < 2 && Math.abs(r2.zz - gz) < 2);
-        if (r && !raidAvailable(r)) { startRaid(r.id); return; }
+        if (r && !raidAvailable(r)) { this.lastRaid = this.t; startRaid(r.id); return; }
+        this.committed = 0;
       }
       // arrived: linger and let the fight logic take over
       this.thinkT = Math.min(this.thinkT, 1.2);
@@ -202,16 +273,25 @@ const AUTO = {
       this.actLabel = this.goalKind === 'boss' ? 'Searching the lair' : 'Clearing the area';
       return;
     }
+    // watchdog: long journeys must actually make progress
+    this.travelT += dt;
+    if (d < this.bestD - 2) { this.bestD = d; this.noProg = 0; } else this.noProg += dt;
+    if (this.noProg > 24 || this.travelT > 150) { this.abandonGoal(p, 'no route'); return; }
+
     const nv = [0, 0];
-    navStep(p.x, p.z, gx, gz, nv);
+    navStep(p.x, p.z, gx, gz, nv, d > 70);      // swim across water on long trips
     INPUT.mx = nv[0]; INPUT.mz = nv[1];
     INPUT.sprint = d > 40;
     this.actLabel = ({ quest: 'Questing', grind: 'Grinding', boss: 'Hunting a world boss', raid: 'Travelling to raid', travel: 'Travelling' })[this.goalKind] || 'Travelling';
-    // stuck detection: if we barely moved for 2.5s, jump and pick a new goal
+    // short-term snag (a boulder, a ledge): hop and sidestep, keep the goal
     this.stuckT += dt;
     if (this.stuckT > 2.5) {
       const moved = Math.hypot(p.x - this.lastPos[0], p.z - this.lastPos[1]);
-      if (moved < 2.5) { INPUT.jump = true; this.thinkT = 0; this.goal = [gx + (Math.random() - .5) * 60, gz + (Math.random() - .5) * 60]; }
+      if (moved < 2.5) {
+        INPUT.jump = true;
+        const a = Math.random() * TAU;
+        INPUT.mx = Math.sin(a); INPUT.mz = Math.cos(a);
+      }
       this.lastPos[0] = p.x; this.lastPos[1] = p.z; this.stuckT = 0;
     }
   },

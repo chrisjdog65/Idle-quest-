@@ -244,7 +244,7 @@ const PANEL_RENDER = {
       if (g.playerGuild) h += '<tr class="me"><td class="rk">★</td><td><b>' + esc(p.name) + '</b></td><td>' + p.level + '</td><td>' + CLASS_BY[p.cls].n + '</td><td>' + fmt(p.st.gs) + '</td><td>you</td></tr>';
       mem.forEach((r, i) => {
         h += '<tr data-act="inspect" data-v="' + r.i + '"><td class="rk">' + (i + 1) + '</td><td class="q' + Math.max(0, r.best) + '">' + esc(r.n) + '</td><td>' + r.lv + '</td><td>' +
-          CLASS_BY[r.c].n + '</td><td>' + fmt(r.gs) + '</td><td class="tiny">' + (AI_STATES.find(s => s.k === r.st) || { n: '—' }).n + '</td></tr>';
+          CLASS_BY[r.c].n + '</td><td>' + fmt(r.gs) + '</td><td class="tiny">' + (AI_STATE_BY[r.st] || { n: '—' }).n + '</td></tr>';
       });
       h += '</table><div class="btn red wide" style="margin-top:9px" data-act="leave">Leave Clan</div>';
       return h;
@@ -373,7 +373,7 @@ const PANEL_RENDER = {
         const zn = zoneAt(r.x, r.z);
         const d = V.dist(r.x, r.z, G.player.x, G.player.z);
         h += '<tr data-act="inspect" data-v="' + r.i + '"><td class="q' + Math.max(0, r.best) + '">' + esc(r.n) + '</td><td>' + r.lv + '</td>' +
-          '<td class="tiny">' + CLASS_BY[r.c].n + '</td><td class="tiny">' + (AI_STATES.find(s => s.k === r.st) || { n: '—' }).n + '</td>' +
+          '<td class="tiny">' + CLASS_BY[r.c].n + '</td><td class="tiny">' + (AI_STATE_BY[r.st] || { n: '—' }).n + '</td>' +
           '<td class="tiny">' + esc(zn ? zn.n : '—') + '</td><td class="tiny">' + Math.round(d) + 'm</td></tr>';
       }
       return h + '</table>';
@@ -514,7 +514,7 @@ function showAIInspect(rec) {
     '<div style="font-size:32px">' + cls.ic + '</div><div style="flex:1">' +
     '<div style="font-size:17px;font-weight:800" class="q' + Math.max(0, rec.best) + '">' + esc(rec.n) + (rec.title ? ' <span class="tiny">' + esc(rec.title) + '</span>' : '') + '</div>' +
     '<div class="tiny">Level ' + rec.lv + ' ' + cls.n + ' · ' + (g ? esc(g.n) : 'no clan') + '</div>' +
-    '<div class="tiny">Currently ' + (AI_STATES.find(s => s.k === rec.st) || { n: '—' }).n + ' in ' + esc((zoneAt(rec.x, rec.z) || { n: '?' }).n) + '</div>' +
+    '<div class="tiny">Currently ' + (AI_STATE_BY[rec.st] || { n: '—' }).n + ' in ' + esc((zoneAt(rec.x, rec.z) || { n: '?' }).n) + '</div>' +
     '</div><div style="text-align:right"><div style="font-size:20px;font-weight:800;color:var(--gold)">#' + rank + '</div><div class="tiny">world rank</div></div></div></div>';
   h += '<h4 class="sec">Gear</h4><div class="slotgrid">';
   for (let i = 0; i < 15; i++) {
@@ -556,7 +556,7 @@ function showGuildInspect(gi) {
     h += '<tr data-act="inspect" data-v="' + r.i + '"><td class="rk">' + (i + 1) + '</td><td class="q' + Math.max(0, r.best) + '">' + esc(r.n) + '</td>' +
       '<td>' + r.lv + '</td><td class="tiny">' + CLASS_BY[r.c].n + '</td><td>' + fmt(r.gs) + '</td>' +
       '<td class="q' + Math.max(0, r.best) + '">' + (r.best >= 0 ? RARITY[r.best].n.slice(0, 4) : '—') + '</td>' +
-      '<td class="tiny">' + (AI_STATES.find(s => s.k === r.st) || { n: '—' }).n + '</td></tr>';
+      '<td class="tiny">' + (AI_STATE_BY[r.st] || { n: '—' }).n + '</td></tr>';
   });
   h += '</table>';
   if (!g.playerGuild) h += '<div class="btn wide gold" style="margin-top:9px" data-act="join" data-v="' + g.i + '">Join ' + esc(g.n) + '</div>';

@@ -183,16 +183,16 @@ function buildPOI() {
     // procedural town layout: ring of buildings around a plaza
     const nb = rng.ri(7, 11);
     for (let i = 0; i < nb; i++) {
-      const a = (i / nb) * TAU + rng.r(-.16, .16);
-      const rad = rng.r(15, 34);
+      const a = (i / nb) * TAU + rng.r(-.14, .14);
+      const rad = rng.r(24, 42);
       hub.bld.push({
         x: z.hx + Math.cos(a) * rad, z: z.hz + Math.sin(a) * rad,
-        w: rng.r(6, 11), d: rng.r(6, 11), hgt: rng.r(5, 10), rot: a + PI / 2 + rng.r(-.3, .3),
+        w: rng.r(5.5, 9.5), d: rng.r(5.5, 9.5), hgt: rng.r(4.5, 8.5), rot: a + PI / 2 + rng.r(-.3, .3),
         roof: rng.chance(.75) ? 1 : 0, tint: rng.r(.75, 1.05),
       });
     }
     POI.hubs.push(hub);
-    addFlat(z.hx, z.hz, 58, h);
+    addFlat(z.hx, z.hz, 66, h);
     // camps: mob spawn anchors
     for (let i = 0; i < 9; i++) {
       const a = rng.f() * TAU, rad = rng.r(z.r * .25, z.r * .95);
@@ -348,21 +348,21 @@ function resolveBuildings(x, z, radius) {
 /* ------------------------------ NAVIGATION ------------------------------ */
 /* Cheap steering-based navigation: walk toward the goal, sidestep when the
    ground ahead is too steep or underwater. Good enough to look purposeful. */
-function navStep(x, z, tx, tz, out) {
+function navStep(x, z, tx, tz, out, allowWater) {
   let dx = tx - x, dz = tz - z;
   const d = Math.hypot(dx, dz) || 1; dx /= d; dz /= d;
   const probe = 4.2;
   const hHere = groundH(x, z);
+  const wet = h => !allowWater && h < WATER_Y - .4 && hHere > WATER_Y;
   const hAhead = groundH(x + dx * probe, z + dz * probe);
-  const blocked = (hAhead - hHere > 3.1) || (hAhead < WATER_Y - .4 && hHere > WATER_Y);
-  if (blocked) {
-    // try fanning left/right until something is passable
+  if ((hAhead - hHere > 3.1) || wet(hAhead)) {
+    // fan out until something is passable; give up and go straight if nothing is
     for (let a = 0.5; a <= 2.6; a += 0.5) {
       for (const s of [1, -1]) {
         const ca = Math.cos(a * s), sa = Math.sin(a * s);
         const nx = dx * ca - dz * sa, nz = dx * sa + dz * ca;
         const hh = groundH(x + nx * probe, z + nz * probe);
-        if (hh - hHere <= 3.1 && !(hh < WATER_Y - .4 && hHere > WATER_Y)) { out[0] = nx; out[1] = nz; return out; }
+        if (hh - hHere <= 3.1 && !wet(hh)) { out[0] = nx; out[1] = nz; return out; }
       }
     }
   }
@@ -387,13 +387,14 @@ function skyColors(tod) {
   const dusk = Math.max(0, 1 - Math.abs(tod - .76) * 14);
   const night = 1 - day;
   const mixc = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
-  let top = mixc([.035, .05, .12], [.16, .38, .74], day);
-  let hor = mixc([.07, .08, .16], [.62, .78, .95], day);
-  let sun = mixc([.42, .48, .72], [1.0, .96, .86], day);
+  let top = mixc([.055, .075, .17], [.16, .38, .74], day);
+  let hor = mixc([.10, .12, .23], [.62, .78, .95], day);
+  let sun = mixc([.52, .58, .82], [1.0, .96, .86], day);
   top = mixc(top, [.24, .16, .34], dawn * .8); hor = mixc(hor, [.95, .55, .32], dawn * .9);
   top = mixc(top, [.20, .12, .30], dusk * .8); hor = mixc(hor, [.98, .46, .26], dusk * .9);
   sun = mixc(sun, [1.0, .62, .34], Math.max(dawn, dusk) * .9);
-  const amb = [lerp(.11, .40, day), lerp(.13, .43, day), lerp(.22, .50, day)];
-  const fog = mixc([.06, .07, .13], [.66, .76, .89], day);
-  return { top, hor, sun, amb, fog, sunI: lerp(.16, 1.0, day), night };
+  // nights are moonlit, not pitch black — the game has to stay playable
+  const amb = [lerp(.21, .40, day), lerp(.24, .43, day), lerp(.36, .50, day)];
+  const fog = mixc([.09, .11, .19], [.66, .76, .89], day);
+  return { top, hor, sun, amb, fog, sunI: lerp(.34, 1.0, day), night };
 }

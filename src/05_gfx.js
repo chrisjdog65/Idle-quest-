@@ -89,7 +89,7 @@ vec3 lambert(vec3 albedo, vec3 N, vec3 V, float shadow, float spec, float rough)
   vec3 diff = uSunCol * uSunI * ndl * (shadow*0.86 + 0.14);
   // hemisphere ambient — sky above, bounce below
   float hemi = N.y*0.5+0.5;
-  vec3 amb = mix(uAmb*0.40, uAmb*1.05, hemi);
+  vec3 amb = mix(uAmb*0.58, uAmb*1.15, hemi);
   vec3 H = normalize(uSun + V);
   float sp = pow(max(dot(N,H),0.0), mix(8.0, 96.0, 1.0-rough)) * spec * shadow * uSunI;
   // subtle rim so silhouettes read against the sky

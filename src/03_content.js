@@ -20,7 +20,7 @@ const RARITY = [
   { n: 'Mythic', c: '#ff3f5f', v: [0, 0, .0000009, .000012, .00006, .00022], mult: 4.60, af: 6, gv: 900 },
 ];
 /* Mythic gear only exists at the very top of the world. */
-const MYTHIC_MIN_LEVEL = 120;
+const MYTHIC_MIN_LEVEL = 200;
 const MYTHIC_MIN_SOURCE = 3;      // world boss or raid only
 const RCOL = RARITY.map(r => r.c);
 /** Only three souls in a season may ever bear Mythic ("Ascendant") gear. */

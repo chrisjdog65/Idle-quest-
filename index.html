@@ -105,8 +105,8 @@ canvas{display:block;touch-action:none}
 #season b{color:var(--gold)}
 #gold{font-size:12px;color:var(--gold);background:rgba(8,12,20,.8);border:1px solid var(--edge2);border-radius:8px;padding:3px 8px;font-weight:800}
 /* ============================== QUEST TRACKER ============================== */
-#tracker{position:absolute;right:calc(6px + var(--sar));top:calc(150px + var(--sat));width:min(36vw,190px);font-size:11px;
-  max-height:min(30vh,calc(100vh - var(--sab) - var(--sat) - 366px));overflow:hidden;pointer-events:none;
+#tracker{position:absolute;right:calc(6px + var(--sar));top:calc(170px + var(--sat));width:min(36vw,190px);font-size:11px;
+  max-height:min(30vh,calc(100vh - var(--sab) - var(--sat) - 400px));overflow:hidden;pointer-events:none;
   mask-image:linear-gradient(180deg,#000 78%,transparent);-webkit-mask-image:linear-gradient(180deg,#000 78%,transparent)}
 .trk{background:linear-gradient(90deg,rgba(8,12,20,.0),rgba(8,12,20,.72) 22%);border-right:2px solid var(--edge2);padding:4px 6px 4px 10px;margin-bottom:4px;border-radius:4px}
 .trk .t{color:var(--gold);font-weight:700;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -276,11 +276,30 @@ h4.sec:first-child{margin-top:2px}
 .champ .cn{font-size:clamp(20px,6vw,34px);font-weight:900;color:#fff;letter-spacing:.06em;text-shadow:0 2px 12px rgba(240,194,87,.5)}
 .champ .cs{color:#c9bda0;font-size:12px}
 /* fps / debug */
-#perf{position:absolute;left:calc(6px + var(--sal));bottom:calc(2px + var(--sab));font-size:9px;color:#6a7386;pointer-events:none;
+#perf{position:absolute;left:calc(6px + var(--sal));top:calc(178px + var(--sat));bottom:auto;font-size:9px;color:#6a7386;pointer-events:none;
   font-family:ui-monospace,Menlo,monospace;opacity:.6;text-align:left;line-height:1.3;white-space:pre;display:none}
 #perf.on{display:block}
 #dpad{display:none}
 @media (min-width:900px){ #stick{opacity:.34} }
+/* Portrait: the menu bar runs the full width, so lift the ability cluster
+   clear of it instead of letting the two overlap. */
+@media (max-aspect-ratio: 4/5){
+  #acts{bottom:calc(54px + var(--sab));width:min(62vw,258px)}
+  #jump{bottom:calc(54px + var(--sab));right:calc(186px + var(--sar))}
+  #sprint{bottom:calc(114px + var(--sab));right:calc(189px + var(--sar))}
+  #interact{bottom:calc(250px + var(--sab))}
+  #chat{bottom:calc(258px + var(--sab));width:min(74vw,320px)}
+  #stick{bottom:calc(56px + var(--sab))}
+  #bar .mb{width:34px}
+  #tracker{top:calc(178px + var(--sat));max-height:min(26vh,calc(100vh - var(--sab) - var(--sat) - 470px))}
+  /* a centred target frame collides with the portrait frame and the minimap,
+     so stack it under the player frame instead */
+  #tframe{left:calc(6px + var(--sal));transform:none;top:calc(96px + var(--sat));width:min(62vw,250px)}
+  #autobtn{top:calc(158px + var(--sat))}
+  #autostate{top:calc(194px + var(--sat));max-width:52vw}
+  #perf{top:calc(238px + var(--sat))}
+  #castbar{bottom:38%}
+}
 .hidden{display:none!important}
 .center{text-align:center}
 .fadein{animation:fi .3s ease-out}
@@ -1253,7 +1272,7 @@ const RARITY = [
   { n: 'Mythic', c: '#ff3f5f', v: [0, 0, .0000009, .000012, .00006, .00022], mult: 4.60, af: 6, gv: 900 },
 ];
 /* Mythic gear only exists at the very top of the world. */
-const MYTHIC_MIN_LEVEL = 120;
+const MYTHIC_MIN_LEVEL = 200;
 const MYTHIC_MIN_SOURCE = 3;      // world boss or raid only
 const RCOL = RARITY.map(r => r.c);
 /** Only three souls in a season may ever bear Mythic ("Ascendant") gear. */
@@ -1925,16 +1944,16 @@ function buildPOI() {
     // procedural town layout: ring of buildings around a plaza
     const nb = rng.ri(7, 11);
     for (let i = 0; i < nb; i++) {
-      const a = (i / nb) * TAU + rng.r(-.16, .16);
-      const rad = rng.r(15, 34);
+      const a = (i / nb) * TAU + rng.r(-.14, .14);
+      const rad = rng.r(24, 42);
       hub.bld.push({
         x: z.hx + Math.cos(a) * rad, z: z.hz + Math.sin(a) * rad,
-        w: rng.r(6, 11), d: rng.r(6, 11), hgt: rng.r(5, 10), rot: a + PI / 2 + rng.r(-.3, .3),
+        w: rng.r(5.5, 9.5), d: rng.r(5.5, 9.5), hgt: rng.r(4.5, 8.5), rot: a + PI / 2 + rng.r(-.3, .3),
         roof: rng.chance(.75) ? 1 : 0, tint: rng.r(.75, 1.05),
       });
     }
     POI.hubs.push(hub);
-    addFlat(z.hx, z.hz, 58, h);
+    addFlat(z.hx, z.hz, 66, h);
     // camps: mob spawn anchors
     for (let i = 0; i < 9; i++) {
       const a = rng.f() * TAU, rad = rng.r(z.r * .25, z.r * .95);
@@ -2090,21 +2109,21 @@ function resolveBuildings(x, z, radius) {
 /* ------------------------------ NAVIGATION ------------------------------ */
 /* Cheap steering-based navigation: walk toward the goal, sidestep when the
    ground ahead is too steep or underwater. Good enough to look purposeful. */
-function navStep(x, z, tx, tz, out) {
+function navStep(x, z, tx, tz, out, allowWater) {
   let dx = tx - x, dz = tz - z;
   const d = Math.hypot(dx, dz) || 1; dx /= d; dz /= d;
   const probe = 4.2;
   const hHere = groundH(x, z);
+  const wet = h => !allowWater && h < WATER_Y - .4 && hHere > WATER_Y;
   const hAhead = groundH(x + dx * probe, z + dz * probe);
-  const blocked = (hAhead - hHere > 3.1) || (hAhead < WATER_Y - .4 && hHere > WATER_Y);
-  if (blocked) {
-    // try fanning left/right until something is passable
+  if ((hAhead - hHere > 3.1) || wet(hAhead)) {
+    // fan out until something is passable; give up and go straight if nothing is
     for (let a = 0.5; a <= 2.6; a += 0.5) {
       for (const s of [1, -1]) {
         const ca = Math.cos(a * s), sa = Math.sin(a * s);
         const nx = dx * ca - dz * sa, nz = dx * sa + dz * ca;
         const hh = groundH(x + nx * probe, z + nz * probe);
-        if (hh - hHere <= 3.1 && !(hh < WATER_Y - .4 && hHere > WATER_Y)) { out[0] = nx; out[1] = nz; return out; }
+        if (hh - hHere <= 3.1 && !wet(hh)) { out[0] = nx; out[1] = nz; return out; }
       }
     }
   }
@@ -2129,15 +2148,16 @@ function skyColors(tod) {
   const dusk = Math.max(0, 1 - Math.abs(tod - .76) * 14);
   const night = 1 - day;
   const mixc = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t), lerp(a[2], b[2], t)];
-  let top = mixc([.035, .05, .12], [.16, .38, .74], day);
-  let hor = mixc([.07, .08, .16], [.62, .78, .95], day);
-  let sun = mixc([.42, .48, .72], [1.0, .96, .86], day);
+  let top = mixc([.055, .075, .17], [.16, .38, .74], day);
+  let hor = mixc([.10, .12, .23], [.62, .78, .95], day);
+  let sun = mixc([.52, .58, .82], [1.0, .96, .86], day);
   top = mixc(top, [.24, .16, .34], dawn * .8); hor = mixc(hor, [.95, .55, .32], dawn * .9);
   top = mixc(top, [.20, .12, .30], dusk * .8); hor = mixc(hor, [.98, .46, .26], dusk * .9);
   sun = mixc(sun, [1.0, .62, .34], Math.max(dawn, dusk) * .9);
-  const amb = [lerp(.11, .40, day), lerp(.13, .43, day), lerp(.22, .50, day)];
-  const fog = mixc([.06, .07, .13], [.66, .76, .89], day);
-  return { top, hor, sun, amb, fog, sunI: lerp(.16, 1.0, day), night };
+  // nights are moonlit, not pitch black — the game has to stay playable
+  const amb = [lerp(.21, .40, day), lerp(.24, .43, day), lerp(.36, .50, day)];
+  const fog = mixc([.09, .11, .19], [.66, .76, .89], day);
+  return { top, hor, sun, amb, fog, sunI: lerp(.34, 1.0, day), night };
 }
 
 /* =========================================================================
@@ -2231,7 +2251,7 @@ vec3 lambert(vec3 albedo, vec3 N, vec3 V, float shadow, float spec, float rough)
   vec3 diff = uSunCol * uSunI * ndl * (shadow*0.86 + 0.14);
   // hemisphere ambient — sky above, bounce below
   float hemi = N.y*0.5+0.5;
-  vec3 amb = mix(uAmb*0.40, uAmb*1.05, hemi);
+  vec3 amb = mix(uAmb*0.58, uAmb*1.15, hemi);
   vec3 H = normalize(uSun + V);
   float sp = pow(max(dot(N,H),0.0), mix(8.0, 96.0, 1.0-rough)) * spec * shadow * uSunI;
   // subtle rim so silhouettes read against the sky
@@ -2914,7 +2934,7 @@ function meshPyramid() {
 /* ------------------------------ MESH REGISTRY ------------------------------ */
 const M = {};      // instanced batch registry
 const GLX = {};     // non-batched GL objects (grass + particle buffers)
-const INST_MAX = { rbox: 4200, box: 1400, cyl: 2600, cone: 3600, sph: 3000, pyr: 600 };
+const INST_MAX = { rbox: 4600, box: 2600, cyl: 3200, cone: 5200, sph: 5200, pyr: 700 };
 function buildMeshes() {
   const mk = (m, cap) => makeInstMesh(m.v, m.i, cap);
   M.rbox = mk(meshRoundBox(5, .30), INST_MAX.rbox);
@@ -3214,6 +3234,8 @@ function drawCharacter(e, lod) {
   const acc = e.accent || [.7, .2, .2];
   const glow = e.glow || 0;
   const gr = e.glowCol || [1, .6, .2];
+  // a little self-illumination keeps silhouettes readable in deep shade
+  const fill = (e.fill || 0) + (R.sky ? R.sky.night * 0.10 : 0);
 
   const swing = Math.sin(t * 9.0) * spd;
   const swing2 = Math.sin(t * 9.0 + PI) * spd;
@@ -3229,22 +3251,22 @@ function drawCharacter(e, lod) {
   // --- torso ---
   const torsoR = bodyPitch + (cast ? -0.12 : 0) + Math.sin(t * 1.9) * 0.012;
   partMat(_cm, 0, hipY - rootY + 0.30 * S, 0, torsoR, 0, 0, 0.52 * S, 0.62 * S, 0.32 * S, bx, rootY, bz, yaw);
-  pushInst(M.rbox, _cm, gc[0], gc[1], gc[2], glow * .5, 0, .72);
+  pushInst(M.rbox, _cm, gc[0], gc[1], gc[2], glow * .5 + fill, 0, .72);
   // --- pelvis ---
   partMat(_cm, 0, hipY - rootY - 0.06 * S, 0, torsoR * .5, 0, 0, 0.44 * S, 0.26 * S, 0.30 * S, bx, rootY, bz, yaw);
-  pushInst(M.rbox, _cm, gc2[0], gc2[1], gc2[2], 0, 0, .8);
+  pushInst(M.rbox, _cm, gc2[0], gc2[1], gc2[2], fill, 0, .8);
   // --- head ---
   const headY = hipY - rootY + 0.74 * S;
   const hy = (e.headYaw || 0);
   partMat(_cm, 0, headY, 0.02 * S, torsoR * .3 + (dead ? .3 : 0), hy, 0, 0.30 * S, 0.32 * S, 0.29 * S, bx, rootY, bz, yaw);
-  pushInst(M.rbox, _cm, sk[0], sk[1], sk[2], 0, 0, .92);
+  pushInst(M.rbox, _cm, sk[0], sk[1], sk[2], fill, 0, .92);
   // hair / helm
   if (e.helm) {
     partMat(_cm, 0, headY + 0.10 * S, 0, torsoR * .3, hy, 0, 0.34 * S, 0.26 * S, 0.33 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, gc[0] * 1.1, gc[1] * 1.1, gc[2] * 1.1, glow * .8, 0, .45);
+    pushInst(M.rbox, _cm, gc[0] * 1.1, gc[1] * 1.1, gc[2] * 1.1, glow * .8 + fill, 0, .45);
   } else {
     partMat(_cm, 0, headY + 0.11 * S, -0.02 * S, torsoR * .3, hy, 0, 0.32 * S, 0.20 * S, 0.31 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, hc[0], hc[1], hc[2], 0, 0, .9);
+    pushInst(M.rbox, _cm, hc[0], hc[1], hc[2], fill, 0, .9);
   }
   if (lod > 0) return;   // distant characters stop here (6 parts)
 
@@ -3252,7 +3274,7 @@ function drawCharacter(e, lod) {
   if (e.pads) {
     for (const s of [-1, 1]) {
       partMat(_cm, s * 0.34 * S, hipY - rootY + 0.55 * S, 0, torsoR, 0, s * 0.28, 0.26 * S, 0.20 * S, 0.28 * S, bx, rootY, bz, yaw);
-      pushInst(M.rbox, _cm, acc[0], acc[1], acc[2], glow, 0, .4);
+      pushInst(M.rbox, _cm, acc[0], acc[1], acc[2], glow + fill, 0, .4);
     }
   }
   // --- arms ---
@@ -3267,11 +3289,11 @@ function drawCharacter(e, lod) {
     if (dead) { upR = 1.2; foreR = -0.2; }
     const shX = s * 0.42 * S, shY = hipY - rootY + 0.52 * S;
     partMat(_cm, shX, shY - 0.16 * S, Math.sin(upR) * 0.14 * S, upR, 0, s * 0.14, 0.17 * S, 0.40 * S, 0.17 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, gc[0] * .9, gc[1] * .9, gc[2] * .9, 0, 0, .7);
+    pushInst(M.rbox, _cm, gc[0] * .9, gc[1] * .9, gc[2] * .9, fill, 0, .7);
     const elY = shY - 0.36 * S - Math.cos(upR) * 0.06 * S;
     const elZ = Math.sin(upR) * 0.34 * S;
     partMat(_cm, shX, elY - 0.16 * S, elZ + Math.sin(upR + foreR) * 0.14 * S, upR + foreR, 0, s * 0.06, 0.15 * S, 0.36 * S, 0.15 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, sk[0], sk[1], sk[2], 0, 0, .9);
+    pushInst(M.rbox, _cm, sk[0], sk[1], sk[2], fill, 0, .9);
     // hand-held gear
     const hY = elY - 0.34 * S, hZ = elZ + Math.sin(upR + foreR) * 0.32 * S;
     if (isMain && e.wpn) {
@@ -3282,11 +3304,11 @@ function drawCharacter(e, lod) {
       pushInst(M.rbox, _cm, e.wpnCol[0], e.wpnCol[1], e.wpnCol[2], e.wpnGlow || 0, 0, .25);
       // pommel
       partMat(_cm, shX + s * 0.04 * S, hY, hZ, wr, 0, 0, 0.14 * S, 0.14 * S, 0.14 * S, bx, rootY, bz, yaw);
-      pushInst(M.rbox, _cm, .28, .22, .16, 0, 0, .8);
+      pushInst(M.rbox, _cm, .28, .22, .16, fill, 0, .8);
     }
     if (!isMain && e.shield) {
       partMat(_cm, shX - s * 0.05 * S, hY + 0.16 * S, hZ + 0.12 * S, 0.2, 0, s * .2, 0.42 * S, 0.52 * S, 0.10 * S, bx, rootY, bz, yaw);
-      pushInst(M.rbox, _cm, acc[0] * .9, acc[1] * .9, acc[2] * .9, glow * .6, 0, .4);
+      pushInst(M.rbox, _cm, acc[0] * .9, acc[1] * .9, acc[2] * .9, glow * .6 + fill, 0, .4);
     }
   }
   // --- legs ---
@@ -3297,25 +3319,26 @@ function drawCharacter(e, lod) {
     if (dead) { th = -0.3; kn = 0.5; }
     const hX = s * 0.19 * S;
     partMat(_cm, hX, hipY - rootY - 0.34 * S, Math.sin(th) * 0.14 * S, th, 0, 0, 0.20 * S, 0.46 * S, 0.20 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, gc2[0] * .95, gc2[1] * .95, gc2[2] * .95, 0, 0, .78);
+    pushInst(M.rbox, _cm, gc2[0] * .95, gc2[1] * .95, gc2[2] * .95, fill, 0, .78);
     const kY = hipY - rootY - 0.56 * S - Math.cos(th) * 0.06 * S, kZ = Math.sin(th) * 0.4 * S;
     partMat(_cm, hX, kY - 0.22 * S, kZ + Math.sin(th - kn) * 0.16 * S, th - kn, 0, 0, 0.18 * S, 0.44 * S, 0.18 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, gc2[0] * .8, gc2[1] * .8, gc2[2] * .8, 0, 0, .8);
+    pushInst(M.rbox, _cm, gc2[0] * .8, gc2[1] * .8, gc2[2] * .8, fill, 0, .8);
     // boot
     partMat(_cm, hX, kY - 0.44 * S, kZ + Math.sin(th - kn) * 0.32 * S + 0.05 * S, 0, 0, 0, 0.20 * S, 0.13 * S, 0.30 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, .17, .13, .11, 0, 0, .85);
+    pushInst(M.rbox, _cm, .17, .13, .11, fill, 0, .85);
   }
   // --- cape ---
   if (e.cape) {
     const cr = 0.18 + spd * 0.5 + Math.sin(t * 5) * 0.06 * spd;
     partMat(_cm, 0, hipY - rootY + 0.22 * S, -0.20 * S - spd * 0.1 * S, cr, 0, 0, 0.52 * S, 0.82 * S, 0.05 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, acc[0], acc[1], acc[2], glow * .4, 0, .55);
+    pushInst(M.rbox, _cm, acc[0], acc[1], acc[2], glow * .4 + fill, 0, .55);
   }
   // --- rarity aura for legendary / mythic gear ---
   if (glow > 0.35) {
-    if ((R.frame + (e.id | 0) * 7) % 3 === 0)
-      spawnPart(bx + (Math.random() - .5) * .7 * S, rootY + Math.random() * 1.7 * S, bz + (Math.random() - .5) * .7 * S,
-        0, .35 + Math.random() * .4, 0, .9, .17 * S, gr[0], gr[1], gr[2], .8, 0, .4, 0);
+    const every = glow > .8 ? 2 : 3;
+    if ((R.frame + (e.id | 0) * 7) % every === 0)
+      spawnPart(bx + (Math.random() - .5) * .9 * S, rootY + Math.random() * 1.9 * S, bz + (Math.random() - .5) * .9 * S,
+        0, .45 + Math.random() * .5, 0, 1.1, (glow > .8 ? .30 : .22) * S, gr[0], gr[1], gr[2], .95, 0, .3, 0);
   }
 }
 
@@ -3331,6 +3354,7 @@ function drawProps(px, pz, viewDist) {
   const c0 = Math.floor((px - viewDist) / CHUNK), c1 = Math.floor((px + viewDist) / CHUNK);
   const d0 = Math.floor((pz - viewDist) / CHUNK), d1 = Math.floor((pz + viewDist) / CHUNK);
   const vd2 = viewDist * viewDist;
+  const thinStart = viewDist * 0.42;
   for (let ci = c0; ci <= c1; ci++) for (let cj = d0; cj <= d1; cj++) {
     const cxp = ci * CHUNK + CHUNK / 2, czp = cj * CHUNK + CHUNK / 2;
     if (V.dist2(px, pz, cxp, czp) > (viewDist + CHUNK) * (viewDist + CHUNK)) continue;
@@ -3339,7 +3363,14 @@ function drawProps(px, pz, viewDist) {
     for (let i = 0; i < ch.trees.length; i++) {
       const p = ch.trees[i];
       const d2 = V.dist2(px, pz, p.x, p.z); if (d2 > vd2) continue;
-      const far = d2 > 160 * 160;
+      // thin distant woods deterministically: density falls off instead of
+      // popping at a hard edge, and the instance budget is never exhausted
+      const dn = Math.sqrt(d2);
+      if (dn > thinStart) {
+        const keep = 1 - smoothstep(thinStart, viewDist, dn) * 0.72;
+        if ((((i * 2654435761) ^ (ci * 40503) ^ (cj * 12289)) >>> 9) % 1024 > keep * 1024) continue;
+      }
+      const far = d2 > 150 * 150;
       const tc = TREE_COL[p.k];
       const h = 3.2 * p.s;
       M4.trs(_m, p.x, p.y, p.z, 0, p.r, 0, 0.62 * p.s, h, 0.62 * p.s);
@@ -3393,9 +3424,10 @@ function drawTowns(px, pz, viewDist) {
       // stone plinth
       M4.trs(_m, b.x, gy + .35, b.z, 0, b.rot, 0, b.w * 1.10, .7, b.d * 1.10);
       pushInst(M.box, _m, .38 * t, .36 * t, .33 * t, 0, 0, .96);
-      // plastered walls
+      // plastered walls — a hint of lamplight bounce keeps towns readable at night
+      const glowN = R.sky ? R.sky.night * 0.07 : 0;
       M4.trs(_m, b.x, gy + .6 + b.hgt * .5, b.z, 0, b.rot, 0, b.w, b.hgt, b.d);
-      pushInst(M.box, _m, .60 * t, .53 * t, .44 * t, 0, 0, .93);
+      pushInst(M.box, _m, .60 * t, .53 * t, .44 * t, glowN, 0, .93);
       // exposed timber frame: two horizontal bands
       for (const fy of [0.34, 0.74]) {
         M4.trs(_m, b.x, gy + .6 + b.hgt * fy, b.z, 0, b.rot, 0, b.w * 1.02, .22, b.d * 1.02);
@@ -3418,7 +3450,7 @@ function drawTowns(px, pz, viewDist) {
       }
       // windows — warm and lit after dusk
       const night = R.sky.night;
-      const wlit = night > .2 ? night * 1.5 : 0;
+      const wlit = night > .12 ? night * 3.0 : 0;
       const wc = wlit > 0 ? [1.0, .78, .38] : [.16, .19, .24];
       for (const sgn of [-1, 1]) {
         const cx2 = Math.cos(b.rot), sz2 = Math.sin(b.rot);
@@ -3724,7 +3756,7 @@ function renderScene(cam, dt) {
   gl.uniform1f(pp.u.uBloomAmt, bloomOn ? 0.42 : 0.0);
   gl.uniform1f(pp.u.uSharp, R.quality > 0 ? 0.34 : 0.0);
   gl.uniform1f(pp.u.uVig, 0.34);
-  gl.uniform1f(pp.u.uExposure, 1.06);
+  gl.uniform1f(pp.u.uExposure, 1.06 + (R.sky ? R.sky.night * 0.30 : 0));
   gl.uniform1f(pp.u.uFlash, R.flash);
   gl.uniform3fv(pp.u.uFlashCol, R.flashCol);
   gl.uniform1f(pp.u.uDamage, R.dmgVig);
@@ -3751,7 +3783,7 @@ const G = {
   cam: { x: 0, y: 12, z: 12, tx: 0, ty: 1, tz: 0 },
   zone: null, lastZone: -1,
   inRaid: null, raidStage: 0, raidT: 0,
-  deathT: 0, resT: 0,
+  deathT: 0, resT: 0, victoryT: 0,
   toastQ: [],
 };
 
@@ -3858,10 +3890,14 @@ function styleFromGear(e, gear, clsId) {
   const best = bestTierOf(gear);
   const rg = rarityGlow(best);
   const chest = gear.chest, wpn = gear.weapon;
-  const ct = chest ? chest.t : 0;
-  const base = RARITY[ct] ? hexToRgb(RARITY[ct].c) : [.5, .5, .5];
-  e.gearCol = [lerp(c.col[0], base[0], .42), lerp(c.col[1], base[1], .42), lerp(c.col[2], base[2], .42)];
-  e.gearCol2 = [e.gearCol[0] * .62, e.gearCol[1] * .62, e.gearCol[2] * .68];
+  // With armour on, the torso takes the rarity colour tinted by class. With
+  // nothing equipped you wear plain travelling clothes, not bare skin.
+  const base = chest ? hexToRgb(RARITY[chest.t].c) : [.40, .34, .26];
+  const t = chest ? .45 : .82;
+  e.gearCol = [lerp(c.col[0], base[0], t), lerp(c.col[1], base[1], t), lerp(c.col[2], base[2], t)];
+  e.gearCol2 = gear.legs
+    ? [e.gearCol[0] * .62, e.gearCol[1] * .62, e.gearCol[2] * .68]
+    : [.29, .24, .19];
   e.accent = c.col.slice();
   e.glow = rg.g; e.glowCol = rg.c;
   e.helm = !!gear.head; e.pads = !!gear.shoulder; e.cape = !!gear.back;
@@ -3964,11 +4000,11 @@ function makePlayer(name, clsId) {
     quests: [], done: {}, doneCount: 0, kills: 0, deaths: 0, bossKills: 0, raidKills: 0,
     guild: null, respect: 0, playtime: 0, mythic: 0,
     stats: { dmgDone: 0, dmgTaken: 0, healed: 0, goldEarned: 0, itemsFound: 0, questsDone: 0, bossesKilled: 0, raidsDone: 0, pvpWins: 0, distance: 0 },
-    autoOn: false, autoMode: 'all', dead: 0, sprint: 1, swim: 0,
+    autoOn: false, autoMode: 'all', dead: 0, sprint: 1, swim: 0, fill: 0.07,
     lastTownVisit: 0, seenZones: {}, af: {},
   };
   const hub = POI.hubs[0];
-  p.x = hub.x + 6; p.z = hub.z + 8; p.y = groundH(p.x, p.z);
+  p.x = hub.x + 40; p.z = hub.z + 34; p.y = groundH(p.x, p.z);
   // starter kit: a plain weapon so the first swing feels like something
   const rng = new RNG(SEED ^ 0x51A27);
   p.gear.weapon = genItem(rng, 3, 0, 'weapon', clsId);
@@ -4020,9 +4056,11 @@ function moveEntity(e, wishX, wishZ, speed, dt, isPlayer) {
     let nx = wishX / wl, nz = wishZ / wl;
     const step = speed * dt;
     let tx = e.x + nx * step, tz = e.z + nz * step;
-    // slope rejection: refuse to climb near-vertical faces
+    // slope rejection: small rises are always steppable, steeper ground is
+    // judged by gradient so the limit does not change with frame rate
     const th = groundH(tx, tz);
-    if (th - groundH(e.x, e.z) > step * 2.4 + 0.55) {
+    const rise = th - groundH(e.x, e.z);
+    if (rise > 0.62 && rise / Math.max(step, 1e-4) > 1.7) {
       // slide along the contour instead of stopping dead
       const sx = -nz, sz = nx;
       const s1 = groundH(e.x + sx * step, e.z + sz * step);
@@ -4055,7 +4093,9 @@ function dmgNumber(x, y, z, val, kind) {
   G.dmg.push({ x, y, z, v: val, k: kind, t: 0, ox: (Math.random() - .5) * .8 });
   if (G.dmg.length > 60) G.dmg.shift();
 }
-function dealDamage(src, tgt, amount, kind, noText) {
+/** `splash` marks a secondary hit: it must not re-trigger cleave, or the
+    affix recurses into itself forever. */
+function dealDamage(src, tgt, amount, kind, noText, splash) {
   if (!tgt || tgt.dead) return 0;
   const p = G.player;
   let dmg = amount;
@@ -4073,11 +4113,14 @@ function dealDamage(src, tgt, amount, kind, noText) {
   if (src === p) {
     p.stats.dmgDone += dmg;
     if (p.st.leechP > 0) healEntity(p, dmg * p.st.leechP, true);
-    if ((p.af.burn || 0)) addDot(tgt, dmg * p.af.burn * .01 / 4, 4, p);
-    if ((p.af.cleave || 0)) {
+    if ((p.af.burn || 0) && !splash) addDot(tgt, dmg * p.af.burn * .01 / 4, 4, p);
+    if ((p.af.cleave || 0) && !splash) {
+      let hit = 0;
       for (const o of G.ents) {
         if (o === tgt || !o.isMob || o.dead) continue;
-        if (V.dist2(o.x, o.z, tgt.x, tgt.z) < 25) dealDamage(src, o, dmg * p.af.cleave * .01, null, true);
+        if (V.dist2(o.x, o.z, tgt.x, tgt.z) > 25) continue;
+        dealDamage(src, o, dmg * p.af.cleave * .01, null, true, true);
+        if (++hit >= 6) break;
       }
     }
     if (tgt.hp <= 0) onMobKilled(tgt, p);
@@ -4398,7 +4441,8 @@ function killPlayer(p) {
 }
 function revivePlayer(p) {
   const hub = nearestPOI(p.x, p.z, 'hubs') || POI.hubs[0];
-  p.x = hub.x + (Math.random() - .5) * 10; p.z = hub.z + (Math.random() - .5) * 10;
+  const ra = Math.random() * TAU;
+  p.x = hub.x + Math.cos(ra) * 46; p.z = hub.z + Math.sin(ra) * 46;
   p.y = groundH(p.x, p.z);
   p.dead = 0; p.an.dead = 0; p.hp = p.st.hpMax; p.safeT = 5;
   p.res = CLASS_BY[p.cls].res === 'rage' ? 0 : p.resMax;
@@ -4450,7 +4494,17 @@ function updateMob(e, dt, p) {
       faceToward(e, p.x, p.z, dt, 30);
       const dmg = mobDamage(e, p) * (0.85 + Math.random() * 0.3) * (e.enraged ? 1.7 : 1);
       applyDamageToPlayer(p, dmg, e);
-      sfx('swing', .5, .7);
+      sfx(e.ranged ? 'cast' : 'swing', .5, .7);
+      if (e.ranged) {
+        // a visible tracer so ranged attacks are readable, not invisible chip damage
+        const sy = e.y + 1.3 * (e.scale || 1);
+        const dx = p.x - e.x, dy = (p.y + 1.2) - sy, dz = p.z - e.z;
+        for (let k = 0; k < 7; k++) {
+          const t2 = k / 7;
+          spawnPart(e.x + dx * t2, sy + dy * t2, e.z + dz * t2, 0, 0, 0, .22 + t2 * .12, .16,
+            .95, .55, .30, .9, 1, 0, 0);
+        }
+      }
     }
     faceToward(e, p.x, p.z, dt, 8);
   } else if (e.st === 'return') {
@@ -4552,7 +4606,7 @@ function applyDamageToPlayer(p, amount, src) {
   dmgNumber(p.x, p.y + 2.2, p.z, dmg, 'in');
   R.dmgVig = Math.min(1, R.dmgVig + dmg / p.st.hpMax * 1.6);
   R.camShake = Math.min(.6, R.camShake + dmg / p.st.hpMax * 1.2);
-  if ((p.af.thorns || 0) && src && src.isMob) dealDamage(p, src, dmg * p.af.thorns * .01, null, true);
+  if ((p.af.thorns || 0) && src && src.isMob) dealDamage(p, src, dmg * p.af.thorns * .01, null, true, true);
   if (CLASS_BY[p.cls].res === 'rage') p.res = Math.min(p.resMax, p.res + 8);
   G.combat = 6;
   if (p.hp <= 0) killPlayer(p);
@@ -4639,6 +4693,7 @@ function updateAIAvatar(e, dt, p) {
 
 /* ------------------------------ SPAWNING ------------------------------ */
 const MAX_MOBS = 44, MAX_AI = 34;
+const NEARBY_AI = [];
 function updateSpawns(dt, p) {
   G.spawnT -= dt;
   if (G.spawnT > 0) return;
@@ -4695,19 +4750,65 @@ function updateSpawns(dt, p) {
     if (!exists) spawnBoss(bd);
   }
   // ---- visible AI adventurers ----
-  if (ROSTER.length) {
-    let guard = 0;
-    while (ais < MAX_AI && guard++ < 40) {
-      const rec = ROSTER[(Math.random() * ROSTER.length) | 0];
-      if (rec.av || rec.dead) continue;
-      const d = V.dist(rec.x, rec.z, p.x, p.z);
-      if (d > 170 || d < 6) continue;
+  // Random sampling misses when few of the 1000 are nearby, so build the
+  // in-range shortlist first and draw from that.
+  if (ROSTER.length && ais < MAX_AI) {
+    NEARBY_AI.length = 0;
+    for (let i = 0; i < ROSTER.length; i++) {
+      const rec = ROSTER[i];
+      if (rec.av) continue;
+      const d2 = V.dist2(rec.x, rec.z, p.x, p.z);
+      if (d2 > 175 * 175 || d2 < 36) continue;
+      NEARBY_AI.push(rec);
+      if (NEARBY_AI.length >= 120) break;
+    }
+    while (ais < MAX_AI && NEARBY_AI.length) {
+      const k = (Math.random() * NEARBY_AI.length) | 0;
+      const rec = NEARBY_AI[k];
+      NEARBY_AI[k] = NEARBY_AI[NEARBY_AI.length - 1]; NEARBY_AI.pop();
       spawnAIAvatar(rec); ais++;
+    }
+    // if the neighbourhood is genuinely empty, pull a few travellers this way
+    if (ais < 8) {
+      let moved = 0;
+      for (let i = 0; i < ROSTER.length && moved < 12; i++) {
+        const rec = ROSTER[(i * 37 + (R.frame | 0)) % ROSTER.length];
+        if (rec.av) continue;
+        const zn = zoneAt(p.x, p.z);
+        if (!zn || Math.abs(rec.lv - (zn.lvMin + zn.lvMax) / 2) > 45) continue;
+        const a = Math.random() * TAU, r = 90 + Math.random() * 70;
+        rec.x = clamp(p.x + Math.cos(a) * r, -WORLD_HALF + 30, WORLD_HALF - 30);
+        rec.z = clamp(p.z + Math.sin(a) * r, -WORLD_HALF + 30, WORLD_HALF - 30);
+        rec.tx = p.x + Math.cos(a + 2) * 40; rec.tz = p.z + Math.sin(a + 2) * 40;
+        moved++;
+      }
     }
   }
 }
 
 /* ------------------------------ CAMERA ------------------------------ */
+/** Is this camera sample buried in solid geometry? */
+function cameraBlocked(x, y, z) {
+  for (const hub of POI.hubs) {
+    if (V.dist2(x, z, hub.x, hub.z) > 110 * 110) continue;
+    for (const b of hub.bld) {
+      const gy = groundH(b.x, b.z);
+      if (y > gy + b.hgt + 1.4) continue;
+      const rr = Math.max(b.w, b.d) * 0.56 + 0.5;
+      if (V.dist2(x, z, b.x, b.z) < rr * rr) return true;
+    }
+  }
+  const cx = Math.floor(x / CHUNK), cz = Math.floor(z / CHUNK);
+  for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+    const c = getChunkProps(cx + i, cz + j);
+    for (let t = 0; t < c.trees.length; t++) {
+      const tr = c.trees[t];
+      const rr = tr.rad * 0.6 + 0.35;
+      if (V.dist2(x, z, tr.x, tr.z) < rr * rr && y < tr.y + 3.4 * tr.s) return true;
+    }
+  }
+  return false;
+}
 function updateCamera(dt, p) {
   const c = G.cam;
   const tgtY = p.y + 1.55 * (p.scale || 1);
@@ -4717,11 +4818,13 @@ function updateCamera(dt, p) {
   const ox = Math.sin(yaw) * Math.cos(pitch), oz = Math.cos(yaw) * Math.cos(pitch), oy = Math.sin(pitch);
   // pull the camera in when terrain would clip it
   let dsafe = dist;
-  for (let s = 0.25; s <= 1.0; s += 0.15) {
+  for (let s = 0.44; s <= 1.0; s += 0.12) {
     const tx = p.x - ox * dist * s, tz = p.z - oz * dist * s, ty = tgtY + oy * dist * s;
     const gh = groundH(tx, tz) + 0.9;
-    if (ty < gh) { dsafe = Math.min(dsafe, dist * s * 0.92); }
+    if (ty < gh) { dsafe = Math.min(dsafe, dist * s * 0.92); break; }
+    if (cameraBlocked(tx, ty, tz)) { dsafe = Math.min(dsafe, dist * s * 0.80); break; }
   }
+  dsafe = Math.max(dsafe, 3.4);
   const shake = G.camShake;
   const sx = shake ? (Math.random() - .5) * shake * .7 : 0;
   const sy = shake ? (Math.random() - .5) * shake * .7 : 0;
@@ -4894,7 +4997,8 @@ function updateWorld(dt) {
   // music director
   const boss = G.ents.find(e => e.kind === 'boss' && e.st === 'chase' && !e.dead);
   let want = 'explore';
-  if (G.inRaid) want = 'raid';
+  if (G.victoryT > 0) { G.victoryT -= dt; want = 'victory'; }
+  else if (G.inRaid) want = 'raid';
   else if (boss) want = 'boss';
   else if (G.combat > 0) want = 'combat';
   else if (p.inTown) want = 'town';
@@ -4973,6 +5077,7 @@ const AI_STATES = [
   { k: 'travel', n: 'travelling', w: 4, xp: 0.30, gold: 0.3, q: 0, poi: 'hubs' },
 ];
 const AI_W = AI_STATES.map(s => s.w);
+const AI_STATE_BY = {}; AI_STATES.forEach(s => AI_STATE_BY[s.k] = s);
 
 /* Deliberately the same shape as the player's own kills-per-level curve, so a
    player who leaves Auto Quest running is genuinely competitive with the field
@@ -5071,7 +5176,7 @@ function advanceRec(rec, dt, fast) {
     }
     if (best) { rec.tx = best.x + _mrng.r(-18, 18); rec.tz = best.z + _mrng.r(-18, 18); rec.z2 = best.zone; }
   }
-  const S = AI_STATES.find(s => s.k === rec.st) || AI_STATES[0];
+  const S = AI_STATE_BY[rec.st] || AI_STATES[0];
   const eff = rec.skill * (0.72 + Math.min(1.0, rec.gs / Math.max(1, refPrimary(rec.lv) * 5.2)) * 0.55) * S.xp;
   rec.lp += levelRate(rec.lv, eff) * dt;
   while (rec.lp >= 1) { rec.lp -= 1; rec.lv++; }
@@ -5165,7 +5270,7 @@ function metaTick(dt) {
 function metaOffline(ms) {
   const secs = Math.min(ms / 1000, SEASON_MS / 1000);
   if (secs < 5) return null;
-  const step = secs > 3600 ? 240 : 30;
+  const step = secs > 86400 ? 600 : secs > 3600 ? 240 : 30;
   const n = Math.min(Math.ceil(secs / step), 4200);
   const realStep = secs / n;
   for (let s = 0; s < n; s++) {
@@ -5254,11 +5359,17 @@ const OFFERS = [];
 function makeIncomingOffer() {
   const p = G.player;
   if (!p || !p.bags.length) return;
-  const idx = (Math.random() * p.bags.length) | 0;
+  // offer on the best thing in the bag, and shop around for a buyer who can pay
+  let idx = 0;
+  for (let i = 1; i < p.bags.length; i++) if (p.bags[i].val > p.bags[idx].val) idx = i;
   const it = p.bags[idx];
   if (it.t < 1) return;
-  const buyer = ROSTER[(Math.random() * ROSTER.length) | 0];
-  if (!buyer || buyer.gold < it.val) return;
+  let buyer = null;
+  for (let t = 0; t < 12; t++) {
+    const c = ROSTER[(Math.random() * ROSTER.length) | 0];
+    if (c && c.gold >= it.val * 1.2) { buyer = c; break; }
+  }
+  if (!buyer) return;
   const price = Math.round(it.val * (1.15 + Math.random() * 0.9));
   const o = { uid: it.u, price, buyer: buyer.n, bid: buyer.i, t: Date.now(), id: (Math.random() * 1e9) | 0 };
   OFFERS.unshift(o);
@@ -5279,6 +5390,7 @@ function acceptOffer(oid) {
   giveGold(p, o.price);
   const b = ROSTER[o.bid]; if (b) b.gold = Math.max(0, b.gold - o.price);
   OFFERS.splice(oi, 1);
+  p.stats.offersTaken = (p.stats.offersTaken || 0) + 1;
   sfx('coin', 1);
   chatPush('trade', 'You sold [' + it.n + '] to ' + o.buyer + ' for ' + fmt(o.price) + 'g');
   return true;
@@ -5369,7 +5481,7 @@ function startRaid(rid) {
   const p = G.player, r = DB.raids[rid];
   const err = raidAvailable(r);
   if (err) { toast(err, 'sys'); sfx('error', .7); return false; }
-  G.inRaid = { r, boss: 0, hp: 0, t: 0, killed: 0, loot: [] };
+  G.inRaid = { r, boss: 0, hp: 0, t: 0, killed: 0, loot: [], cur: null, nextT: 0 };
   RAID_LOCK[r.id] = Date.now() + r.lock;
   panelClose();
   banner(r.n, r.size + '-player raid · ' + r.bosses.length + ' encounters');
@@ -5399,6 +5511,8 @@ function finishRaid(cleared) {
   const R2 = G.inRaid; if (!R2) return;
   const p = G.player, r = R2.r;
   G.inRaid = null;
+  AUTO.lastRaid = AUTO.t;
+  AUTO.goalKind = ''; AUTO.committed = 0; AUTO.thinkT = 0;
   if (cleared) {
     p.stats.raidsDone++; p.raidKills += r.bosses.length;
     const gold = giveGold(p, r.gold * (1 + p.level * .05));
@@ -5410,23 +5524,30 @@ function finishRaid(cleared) {
     banner('RAID CLEARED', r.n + ' · +' + fmt(gold) + 'g · +' + r.respect + ' respect');
     chatPush('world', '🏆 ' + p.name + '\'s group cleared ' + r.n + '!');
     musicSet('victory');
-    setTimeout(() => { if (!G.inRaid) musicSet('explore'); }, 16000);
+    G.musicState = 'victory';
+    G.victoryT = 16;
   } else {
     banner('RAID FAILED', r.n);
     chatPush('guild', 'The raid wiped in ' + r.n + '.');
   }
 }
+/* Encounter pacing runs on game time, not setTimeout: background tabs throttle
+   timers, and a raid must not stall halfway through because of it. */
 function raidTick(dt) {
   const R2 = G.inRaid; if (!R2) return;
   R2.t += dt;
   const p = G.player;
   if (p.dead) { finishRaid(false); return; }
   if (R2.cur && R2.cur.dead) {
-    R2.boss++; R2.killed++; R2.cur = null;
-    if (R2.boss >= R2.r.bosses.length) finishRaid(true);
-    else setTimeout(() => { if (G.inRaid) raidNextBoss(); }, 2600);
+    R2.boss++; R2.killed++; R2.cur = null; R2.nextT = 2.6;
+    if (R2.boss >= R2.r.bosses.length) { finishRaid(true); return; }
   }
-  if (R2.cur && V.dist(p.x, p.z, R2.r.x, R2.r.zz) > 190) { finishRaid(false); }
+  if (!R2.cur) {
+    R2.nextT = (R2.nextT || 0) - dt;
+    if (R2.nextT <= 0) raidNextBoss();
+    return;
+  }
+  if (V.dist(p.x, p.z, R2.r.x, R2.r.zz) > 190) finishRaid(false);
 }
 
 /* ------------------------------ QUESTS ------------------------------ */
@@ -5540,8 +5661,11 @@ function playerAsRecord() {
     title: '', isPlayer: true, x: p.x, z: p.z,
   };
 }
+/* Level first, then gear, then the rest — "highest level, best gear, best
+   overall stats", in that order. */
 function hofScore(r) {
-  return r.lv * 1000 + r.gs * 0.55 + r.best * 4200 + r.bosses * 24 + r.raids * 180 + r.quests * 6 + r.respect * 0.6;
+  return r.lv * 10000 + r.gs * 1.15 + r.best * 9000 +
+    r.bosses * 40 + r.raids * 220 + r.quests * 8 + r.respect * 0.5;
 }
 function hallOfFame(limit) {
   const all = ROSTER.slice();
@@ -5657,6 +5781,14 @@ function chatPush(kind, text) {
   c.appendChild(d);
   while (c.children.length > 22) c.removeChild(c.firstChild);
   c.scrollTop = c.scrollHeight;
+}
+
+let _onceT = 0;
+/** Rate-limited system chatter, so repeated auto-play decisions do not spam. */
+function chatPushOnce(text) {
+  if (G.t - _onceT < 20) return;
+  _onceT = G.t;
+  chatPush('sys', text);
 }
 
 /* ------------------------------ TOOLTIP ------------------------------ */
@@ -6553,7 +6685,7 @@ const PANEL_RENDER = {
       if (g.playerGuild) h += '<tr class="me"><td class="rk">★</td><td><b>' + esc(p.name) + '</b></td><td>' + p.level + '</td><td>' + CLASS_BY[p.cls].n + '</td><td>' + fmt(p.st.gs) + '</td><td>you</td></tr>';
       mem.forEach((r, i) => {
         h += '<tr data-act="inspect" data-v="' + r.i + '"><td class="rk">' + (i + 1) + '</td><td class="q' + Math.max(0, r.best) + '">' + esc(r.n) + '</td><td>' + r.lv + '</td><td>' +
-          CLASS_BY[r.c].n + '</td><td>' + fmt(r.gs) + '</td><td class="tiny">' + (AI_STATES.find(s => s.k === r.st) || { n: '—' }).n + '</td></tr>';
+          CLASS_BY[r.c].n + '</td><td>' + fmt(r.gs) + '</td><td class="tiny">' + (AI_STATE_BY[r.st] || { n: '—' }).n + '</td></tr>';
       });
       h += '</table><div class="btn red wide" style="margin-top:9px" data-act="leave">Leave Clan</div>';
       return h;
@@ -6682,7 +6814,7 @@ const PANEL_RENDER = {
         const zn = zoneAt(r.x, r.z);
         const d = V.dist(r.x, r.z, G.player.x, G.player.z);
         h += '<tr data-act="inspect" data-v="' + r.i + '"><td class="q' + Math.max(0, r.best) + '">' + esc(r.n) + '</td><td>' + r.lv + '</td>' +
-          '<td class="tiny">' + CLASS_BY[r.c].n + '</td><td class="tiny">' + (AI_STATES.find(s => s.k === r.st) || { n: '—' }).n + '</td>' +
+          '<td class="tiny">' + CLASS_BY[r.c].n + '</td><td class="tiny">' + (AI_STATE_BY[r.st] || { n: '—' }).n + '</td>' +
           '<td class="tiny">' + esc(zn ? zn.n : '—') + '</td><td class="tiny">' + Math.round(d) + 'm</td></tr>';
       }
       return h + '</table>';
@@ -6823,7 +6955,7 @@ function showAIInspect(rec) {
     '<div style="font-size:32px">' + cls.ic + '</div><div style="flex:1">' +
     '<div style="font-size:17px;font-weight:800" class="q' + Math.max(0, rec.best) + '">' + esc(rec.n) + (rec.title ? ' <span class="tiny">' + esc(rec.title) + '</span>' : '') + '</div>' +
     '<div class="tiny">Level ' + rec.lv + ' ' + cls.n + ' · ' + (g ? esc(g.n) : 'no clan') + '</div>' +
-    '<div class="tiny">Currently ' + (AI_STATES.find(s => s.k === rec.st) || { n: '—' }).n + ' in ' + esc((zoneAt(rec.x, rec.z) || { n: '?' }).n) + '</div>' +
+    '<div class="tiny">Currently ' + (AI_STATE_BY[rec.st] || { n: '—' }).n + ' in ' + esc((zoneAt(rec.x, rec.z) || { n: '?' }).n) + '</div>' +
     '</div><div style="text-align:right"><div style="font-size:20px;font-weight:800;color:var(--gold)">#' + rank + '</div><div class="tiny">world rank</div></div></div></div>';
   h += '<h4 class="sec">Gear</h4><div class="slotgrid">';
   for (let i = 0; i < 15; i++) {
@@ -6865,7 +6997,7 @@ function showGuildInspect(gi) {
     h += '<tr data-act="inspect" data-v="' + r.i + '"><td class="rk">' + (i + 1) + '</td><td class="q' + Math.max(0, r.best) + '">' + esc(r.n) + '</td>' +
       '<td>' + r.lv + '</td><td class="tiny">' + CLASS_BY[r.c].n + '</td><td>' + fmt(r.gs) + '</td>' +
       '<td class="q' + Math.max(0, r.best) + '">' + (r.best >= 0 ? RARITY[r.best].n.slice(0, 4) : '—') + '</td>' +
-      '<td class="tiny">' + (AI_STATES.find(s => s.k === r.st) || { n: '—' }).n + '</td></tr>';
+      '<td class="tiny">' + (AI_STATE_BY[r.st] || { n: '—' }).n + '</td></tr>';
   });
   h += '</table>';
   if (!g.playerGuild) h += '<div class="btn wide gold" style="margin-top:9px" data-act="join" data-v="' + g.i + '">Join ' + esc(g.n) + '</div>';
@@ -6923,14 +7055,35 @@ const AUTO = {
   act: 'idle', actLabel: 'Idle',
   t: 0, houseT: 0, thinkT: 0, stuckT: 0, lastPos: [0, 0], repathT: 0,
   raidT: 0, sessionXp: 0, sessionGold: 0, sessionItems: 0, sessionKills: 0,
+  avoid: new Map(),          // entity id -> time until we stop running from it
+  blocked: new Map(),        // 'raid:3' / 'boss:12' -> time until we retry it
+  lastRaid: -1e9, committed: 0,
+  travelT: 0, bestD: 1e9, noProg: 0,
 
   reset() {
     this.goal = null; this.goalKind = ''; this.act = 'idle';
     this.thinkT = 0; this.houseT = 0; this.stuckT = 0; this.repathT = 0;
+    this.avoid.clear(); this.blocked.clear(); this.committed = 0;
+    this.travelT = 0; this.bestD = 1e9; this.noProg = 0;
   },
-  setGoal(x, z, kind, name) {
+  /** rough seconds to kill — used to refuse fights we cannot win */
+  ttk(p, e) {
+    const dps = Math.max(1, p.st.dps);
+    return e.hp / dps;
+  },
+  setGoal(x, z, kind, name, tag) {
     this.goal = [x, z]; this.goalKind = kind || 'travel'; this.goalName = name || '';
-    this.repathT = 0;
+    this.repathT = 0; this.goalTag = tag || '';
+    this.travelT = 0; this.bestD = 1e9; this.noProg = 0;
+  },
+  isBlocked(tag) { const t = this.blocked.get(tag); return t != null && t > this.t; },
+  /** Abandon a destination we have failed to reach and stop choosing it. */
+  abandonGoal(p, why) {
+    if (this.goalTag) this.blocked.set(this.goalTag, this.t + 600);
+    if (this.goalKind === 'raid') this.lastRaid = this.t;
+    chatPushOnce('Cannot get there — ' + why + '. Finding something else to do.');
+    this.goal = null; this.goalKind = ''; this.goalTag = '';
+    this.committed = 0; this.thinkT = 0;
   },
   setGoalZone(zid) {
     const z = DB.zones[zid];
@@ -6992,8 +7145,24 @@ const AUTO = {
       INPUT.mx = INPUT.mz = 0; return;
     }
 
+    /* ---- raid night: check before combat, or we never stop killing trash ---- */
+    if (!G.inRaid && this.goalKind !== 'raid' && (this.t - this.lastRaid) > 220) this.tryRaid(p);
+
+    /* ---- bail out of a fight we are clearly losing ---- */
+    const cur = G.target;
+    if (cur && !cur.dead && cur.isMob) {
+      const mine = p.hp / p.st.hpMax, theirs = cur.hp / cur.hpMax;
+      if (mine < 0.30 && theirs > 0.55) {
+        this.avoid.set(cur.id, this.t + 90);
+        G.target = null;
+        this.thinkT = 0;
+        chatPushOnce('That one is out of our league — disengaging.');
+      }
+    }
+
     /* ---- fight anything that is already on us, or worth walking to ---- */
-    let foe = (G.target && !G.target.dead && V.dist(p.x, p.z, G.target.x, G.target.z) < 90) ? G.target : null;
+    let foe = (G.target && !G.target.dead && !this.isAvoided(G.target) &&
+      V.dist(p.x, p.z, G.target.x, G.target.z) < 90) ? G.target : null;
     if (!foe) foe = this.pickFoe(p);
     if (foe) { G.target = foe; this.fight(dt, p, foe); return; }
 
@@ -7005,22 +7174,50 @@ const AUTO = {
 
   /* Choose something to kill. Mobs spawn in a ring around the player, so the
      agent has to be willing to walk to them rather than wait to be attacked. */
+  isAvoided(e) { const t = this.avoid.get(e.id); return t != null && t > this.t; },
+  /** Commit to the best raid we are eligible for. Returns true if we took one. */
+  tryRaid(p) {
+    const mode = p.autoMode || 'all';
+    if (mode !== 'all' && mode !== 'raid') return false;
+    // a raid has to be worth the walk: the range we will travel grows with level
+    const reach = 380 + p.level * 7;
+    const ready = DB.raids.filter(r => !raidAvailable(r) && r.lv <= p.level && r.lv >= p.level - 40
+      && !this.isBlocked('raid:' + r.id) && V.dist2(p.x, p.z, r.x, r.zz) < reach * reach);
+    if (!ready.length) { this.lastRaid = this.t - 120; return false; }   // re-check soon
+    ready.sort((a, b) => (V.dist2(p.x, p.z, a.x, a.zz) - V.dist2(p.x, p.z, b.x, b.zz)) * 0.00002 + (b.lv - a.lv));
+    const r = ready[0];
+    if (V.dist(p.x, p.z, r.x, r.zz) < 14) { this.lastRaid = this.t; startRaid(r.id); return true; }
+    this.setGoal(r.x, r.zz, 'raid', r.n, 'raid:' + r.id);
+    this.act = 'raid'; this.actLabel = 'Travelling to raid'; this.committed = 1;
+    return true;
+  },
   pickFoe(p) {
     let best = null, bs = -1e9;
+    // while travelling to a raid or a named boss, only stop for things hitting us
+    // only a raid march ignores the world — boss hunts still clear quest mobs
+    const onObjective = this.goalKind === 'raid' && this.committed;
     for (const e of G.ents) {
       if (!e.isMob || e.dead) continue;
+      if (this.isAvoided(e)) continue;
       const d = V.dist(p.x, p.z, e.x, e.z);
       if (d > 130) continue;
-      const attacking = e.st === 'chase';
+      const attacking = e.st === 'chase' && d < 30;
       const wanted = this.isWantedTarget(p, e);
-      // never pick a fight far above our weight unless it is the stated goal
+      // a raid march does not detour, but it will not walk past a quest kill
+      if (onObjective && !attacking && !(wanted && d < 26)) continue;
       const overLevel = e.level - p.level;
-      if (!attacking && overLevel > (e.kind === 'boss' ? 2 : 6) && this.goalKind !== 'boss') continue;
+      // refuse anything that would take longer to kill than we can survive
+      if (!attacking) {
+        if (overLevel > (e.kind === 'boss' ? 2 : 6) && this.goalKind !== 'boss') continue;
+        const ttk = this.ttk(p, e);
+        const cap = e.kind === 'boss' ? 150 : e.rank === 1 ? 55 : 30;
+        if (ttk > cap) continue;
+      }
       let sc = -d * 0.05;
       if (attacking) sc += 60;
       if (wanted) sc += 40;
-      if (e.kind === 'boss') sc += (this.goalKind === 'boss' ? 80 : -25);
-      if (e.rank === 1) sc += 8;
+      if (e.kind === 'boss') sc += (this.goalKind === 'boss' ? 90 : -25);
+      if (e.rank === 1) sc += (p.level > 10 ? 8 : -20);
       if (sc > bs) { bs = sc; best = e; }
     }
     return bs > -1e8 ? best : null;
@@ -7042,26 +7239,31 @@ const AUTO = {
 
   chooseGoal(p) {
     const mode = p.autoMode || 'all';
-    // 1) a raid we can enter, if that is the mode or we are geared for it
+    this.committed = 0;
+    // 1) a raid we can enter — raid night comes around on a timer, not a coin flip
     if (mode === 'all' || mode === 'raid') {
-      const ready = DB.raids.filter(r => !raidAvailable(r) && r.lv <= p.level && r.lv >= p.level - 30);
-      if (ready.length && (mode === 'raid' || Math.random() < 0.30)) {
+      const reach = 380 + p.level * 7;
+      const ready = DB.raids.filter(r => !raidAvailable(r) && r.lv <= p.level && r.lv >= p.level - 40
+        && !this.isBlocked('raid:' + r.id) && V.dist2(p.x, p.z, r.x, r.zz) < reach * reach);
+      const due = mode === 'raid' || (this.t - this.lastRaid) > 220;
+      if (ready.length && due) {
         ready.sort((a, b) => b.lv - a.lv);
         const r = ready[0];
         const d = V.dist(p.x, p.z, r.x, r.zz);
-        if (d < 14) { startRaid(r.id); return; }
-        this.setGoal(r.x, r.zz, 'raid', r.n);
-        this.act = 'raid'; this.actLabel = 'Travelling to raid'; return;
+        if (d < 14) { this.lastRaid = this.t; startRaid(r.id); return; }
+        this.setGoal(r.x, r.zz, 'raid', r.n, 'raid:' + r.id);
+        this.act = 'raid'; this.actLabel = 'Travelling to raid'; this.committed = 1; return;
       }
     }
     // 2) an appropriate world boss
     if (mode === 'all' || mode === 'boss') {
-      const cands = DB.bosses.filter(b => b.lv <= p.level + 2 && b.lv >= p.level - 26 && (BOSS_STATE[b.id] || 0) <= G.t);
+      const cands = DB.bosses.filter(b => b.lv <= p.level + 2 && b.lv >= p.level - 26
+        && (BOSS_STATE[b.id] || 0) <= G.t && !this.isBlocked('boss:' + b.id));
       if (cands.length && (mode === 'boss' || Math.random() < 0.26)) {
         cands.sort((a, b) => V.dist2(p.x, p.z, a.x, a.z2) - V.dist2(p.x, p.z, b.x, b.z2));
         const b = cands[(Math.random() * Math.min(3, cands.length)) | 0];
-        this.setGoal(b.x, b.z2, 'boss', b.n + ', ' + b.t);
-        this.act = 'boss'; this.actLabel = 'Hunting a world boss'; return;
+        this.setGoal(b.x, b.z2, 'boss', b.n + ', ' + b.t, 'boss:' + b.id);
+        this.act = 'boss'; this.actLabel = 'Hunting a world boss'; this.committed = 1; return;
       }
     }
     // 3) the nearest unfinished quest objective
@@ -7085,7 +7287,7 @@ const AUTO = {
         if (d < bd) { bd = d; best = { tx, tz, q }; }
       }
       if (best) {
-        this.setGoal(best.tx, best.tz, 'quest', best.q.n);
+        this.setGoal(best.tx, best.tz, 'quest', best.q.n, 'quest:' + best.q.id);
         this.act = 'quest'; this.actLabel = 'Questing'; return;
       }
     }
@@ -7096,7 +7298,7 @@ const AUTO = {
     });
     const pool = camps.length ? camps : POI.camps;
     const c = pool[(Math.random() * pool.length) | 0];
-    this.setGoal(c.x, c.z, 'grind', c.n);
+    this.setGoal(c.x, c.z, 'grind', c.n, 'camp:' + POI.camps.indexOf(c));
     this.act = 'grind'; this.actLabel = 'Grinding';
   },
 
@@ -7107,7 +7309,8 @@ const AUTO = {
     if (d < (this.goalKind === 'grind' || this.goalKind === 'quest' ? 16 : 9)) {
       if (this.goalKind === 'raid') {
         const r = DB.raids.find(r2 => Math.abs(r2.x - gx) < 2 && Math.abs(r2.zz - gz) < 2);
-        if (r && !raidAvailable(r)) { startRaid(r.id); return; }
+        if (r && !raidAvailable(r)) { this.lastRaid = this.t; startRaid(r.id); return; }
+        this.committed = 0;
       }
       // arrived: linger and let the fight logic take over
       this.thinkT = Math.min(this.thinkT, 1.2);
@@ -7115,16 +7318,25 @@ const AUTO = {
       this.actLabel = this.goalKind === 'boss' ? 'Searching the lair' : 'Clearing the area';
       return;
     }
+    // watchdog: long journeys must actually make progress
+    this.travelT += dt;
+    if (d < this.bestD - 2) { this.bestD = d; this.noProg = 0; } else this.noProg += dt;
+    if (this.noProg > 24 || this.travelT > 150) { this.abandonGoal(p, 'no route'); return; }
+
     const nv = [0, 0];
-    navStep(p.x, p.z, gx, gz, nv);
+    navStep(p.x, p.z, gx, gz, nv, d > 70);      // swim across water on long trips
     INPUT.mx = nv[0]; INPUT.mz = nv[1];
     INPUT.sprint = d > 40;
     this.actLabel = ({ quest: 'Questing', grind: 'Grinding', boss: 'Hunting a world boss', raid: 'Travelling to raid', travel: 'Travelling' })[this.goalKind] || 'Travelling';
-    // stuck detection: if we barely moved for 2.5s, jump and pick a new goal
+    // short-term snag (a boulder, a ledge): hop and sidestep, keep the goal
     this.stuckT += dt;
     if (this.stuckT > 2.5) {
       const moved = Math.hypot(p.x - this.lastPos[0], p.z - this.lastPos[1]);
-      if (moved < 2.5) { INPUT.jump = true; this.thinkT = 0; this.goal = [gx + (Math.random() - .5) * 60, gz + (Math.random() - .5) * 60]; }
+      if (moved < 2.5) {
+        INPUT.jump = true;
+        const a = Math.random() * TAU;
+        INPUT.mx = Math.sin(a); INPUT.mz = Math.cos(a);
+      }
       this.lastPos[0] = p.x; this.lastPos[1] = p.z; this.stuckT = 0;
     }
   },
@@ -7347,11 +7559,15 @@ function playerOffline(ms) {
       p.stats.itemsFound++;
       p.st = calcStats(p);
     }
-    if (rng.f() < 0.012 * realStep * EFF) { p.doneCount++; p.stats.questsDone++; }
-    if (rng.f() < 0.0016 * realStep * EFF) { p.bossKills++; p.stats.bossesKilled++; }
-    if (rng.f() < 0.0004 * realStep * EFF) { p.stats.raidsDone++; }
+    p.doneCount += 0.055 * realStep * EFF * 0.34;
+    p.bossKills += 0.010 * realStep * EFF * 0.11;
+    p.stats.raidsDone += 0.0042 * realStep * EFF * 0.09;
+    p.respect += 0.06 * (1 + p.level / 90) * realStep * EFF;
   }
   p.gold = Math.round(p.gold);
+  p.doneCount = Math.round(p.doneCount); p.bossKills = Math.round(p.bossKills);
+  p.stats.raidsDone = Math.round(p.stats.raidsDone);
+  p.stats.questsDone = p.doneCount; p.stats.bossesKilled = p.bossKills;
   p.st = calcStats(p); p.resMax = resourceMax(p); p.hp = p.st.hpMax;
   styleFromGear(p, p.gear, p.cls);
   return {

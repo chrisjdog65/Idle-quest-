@@ -136,7 +136,7 @@ function meshPyramid() {
 /* ------------------------------ MESH REGISTRY ------------------------------ */
 const M = {};      // instanced batch registry
 const GLX = {};     // non-batched GL objects (grass + particle buffers)
-const INST_MAX = { rbox: 4200, box: 1400, cyl: 2600, cone: 3600, sph: 3000, pyr: 600 };
+const INST_MAX = { rbox: 4600, box: 2600, cyl: 3200, cone: 5200, sph: 5200, pyr: 700 };
 function buildMeshes() {
   const mk = (m, cap) => makeInstMesh(m.v, m.i, cap);
   M.rbox = mk(meshRoundBox(5, .30), INST_MAX.rbox);
@@ -436,6 +436,8 @@ function drawCharacter(e, lod) {
   const acc = e.accent || [.7, .2, .2];
   const glow = e.glow || 0;
   const gr = e.glowCol || [1, .6, .2];
+  // a little self-illumination keeps silhouettes readable in deep shade
+  const fill = (e.fill || 0) + (R.sky ? R.sky.night * 0.10 : 0);
 
   const swing = Math.sin(t * 9.0) * spd;
   const swing2 = Math.sin(t * 9.0 + PI) * spd;
@@ -451,22 +453,22 @@ function drawCharacter(e, lod) {
   // --- torso ---
   const torsoR = bodyPitch + (cast ? -0.12 : 0) + Math.sin(t * 1.9) * 0.012;
   partMat(_cm, 0, hipY - rootY + 0.30 * S, 0, torsoR, 0, 0, 0.52 * S, 0.62 * S, 0.32 * S, bx, rootY, bz, yaw);
-  pushInst(M.rbox, _cm, gc[0], gc[1], gc[2], glow * .5, 0, .72);
+  pushInst(M.rbox, _cm, gc[0], gc[1], gc[2], glow * .5 + fill, 0, .72);
   // --- pelvis ---
   partMat(_cm, 0, hipY - rootY - 0.06 * S, 0, torsoR * .5, 0, 0, 0.44 * S, 0.26 * S, 0.30 * S, bx, rootY, bz, yaw);
-  pushInst(M.rbox, _cm, gc2[0], gc2[1], gc2[2], 0, 0, .8);
+  pushInst(M.rbox, _cm, gc2[0], gc2[1], gc2[2], fill, 0, .8);
   // --- head ---
   const headY = hipY - rootY + 0.74 * S;
   const hy = (e.headYaw || 0);
   partMat(_cm, 0, headY, 0.02 * S, torsoR * .3 + (dead ? .3 : 0), hy, 0, 0.30 * S, 0.32 * S, 0.29 * S, bx, rootY, bz, yaw);
-  pushInst(M.rbox, _cm, sk[0], sk[1], sk[2], 0, 0, .92);
+  pushInst(M.rbox, _cm, sk[0], sk[1], sk[2], fill, 0, .92);
   // hair / helm
   if (e.helm) {
     partMat(_cm, 0, headY + 0.10 * S, 0, torsoR * .3, hy, 0, 0.34 * S, 0.26 * S, 0.33 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, gc[0] * 1.1, gc[1] * 1.1, gc[2] * 1.1, glow * .8, 0, .45);
+    pushInst(M.rbox, _cm, gc[0] * 1.1, gc[1] * 1.1, gc[2] * 1.1, glow * .8 + fill, 0, .45);
   } else {
     partMat(_cm, 0, headY + 0.11 * S, -0.02 * S, torsoR * .3, hy, 0, 0.32 * S, 0.20 * S, 0.31 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, hc[0], hc[1], hc[2], 0, 0, .9);
+    pushInst(M.rbox, _cm, hc[0], hc[1], hc[2], fill, 0, .9);
   }
   if (lod > 0) return;   // distant characters stop here (6 parts)
 
@@ -474,7 +476,7 @@ function drawCharacter(e, lod) {
   if (e.pads) {
     for (const s of [-1, 1]) {
       partMat(_cm, s * 0.34 * S, hipY - rootY + 0.55 * S, 0, torsoR, 0, s * 0.28, 0.26 * S, 0.20 * S, 0.28 * S, bx, rootY, bz, yaw);
-      pushInst(M.rbox, _cm, acc[0], acc[1], acc[2], glow, 0, .4);
+      pushInst(M.rbox, _cm, acc[0], acc[1], acc[2], glow + fill, 0, .4);
     }
   }
   // --- arms ---
@@ -489,11 +491,11 @@ function drawCharacter(e, lod) {
     if (dead) { upR = 1.2; foreR = -0.2; }
     const shX = s * 0.42 * S, shY = hipY - rootY + 0.52 * S;
     partMat(_cm, shX, shY - 0.16 * S, Math.sin(upR) * 0.14 * S, upR, 0, s * 0.14, 0.17 * S, 0.40 * S, 0.17 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, gc[0] * .9, gc[1] * .9, gc[2] * .9, 0, 0, .7);
+    pushInst(M.rbox, _cm, gc[0] * .9, gc[1] * .9, gc[2] * .9, fill, 0, .7);
     const elY = shY - 0.36 * S - Math.cos(upR) * 0.06 * S;
     const elZ = Math.sin(upR) * 0.34 * S;
     partMat(_cm, shX, elY - 0.16 * S, elZ + Math.sin(upR + foreR) * 0.14 * S, upR + foreR, 0, s * 0.06, 0.15 * S, 0.36 * S, 0.15 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, sk[0], sk[1], sk[2], 0, 0, .9);
+    pushInst(M.rbox, _cm, sk[0], sk[1], sk[2], fill, 0, .9);
     // hand-held gear
     const hY = elY - 0.34 * S, hZ = elZ + Math.sin(upR + foreR) * 0.32 * S;
     if (isMain && e.wpn) {
@@ -504,11 +506,11 @@ function drawCharacter(e, lod) {
       pushInst(M.rbox, _cm, e.wpnCol[0], e.wpnCol[1], e.wpnCol[2], e.wpnGlow || 0, 0, .25);
       // pommel
       partMat(_cm, shX + s * 0.04 * S, hY, hZ, wr, 0, 0, 0.14 * S, 0.14 * S, 0.14 * S, bx, rootY, bz, yaw);
-      pushInst(M.rbox, _cm, .28, .22, .16, 0, 0, .8);
+      pushInst(M.rbox, _cm, .28, .22, .16, fill, 0, .8);
     }
     if (!isMain && e.shield) {
       partMat(_cm, shX - s * 0.05 * S, hY + 0.16 * S, hZ + 0.12 * S, 0.2, 0, s * .2, 0.42 * S, 0.52 * S, 0.10 * S, bx, rootY, bz, yaw);
-      pushInst(M.rbox, _cm, acc[0] * .9, acc[1] * .9, acc[2] * .9, glow * .6, 0, .4);
+      pushInst(M.rbox, _cm, acc[0] * .9, acc[1] * .9, acc[2] * .9, glow * .6 + fill, 0, .4);
     }
   }
   // --- legs ---
@@ -519,25 +521,26 @@ function drawCharacter(e, lod) {
     if (dead) { th = -0.3; kn = 0.5; }
     const hX = s * 0.19 * S;
     partMat(_cm, hX, hipY - rootY - 0.34 * S, Math.sin(th) * 0.14 * S, th, 0, 0, 0.20 * S, 0.46 * S, 0.20 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, gc2[0] * .95, gc2[1] * .95, gc2[2] * .95, 0, 0, .78);
+    pushInst(M.rbox, _cm, gc2[0] * .95, gc2[1] * .95, gc2[2] * .95, fill, 0, .78);
     const kY = hipY - rootY - 0.56 * S - Math.cos(th) * 0.06 * S, kZ = Math.sin(th) * 0.4 * S;
     partMat(_cm, hX, kY - 0.22 * S, kZ + Math.sin(th - kn) * 0.16 * S, th - kn, 0, 0, 0.18 * S, 0.44 * S, 0.18 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, gc2[0] * .8, gc2[1] * .8, gc2[2] * .8, 0, 0, .8);
+    pushInst(M.rbox, _cm, gc2[0] * .8, gc2[1] * .8, gc2[2] * .8, fill, 0, .8);
     // boot
     partMat(_cm, hX, kY - 0.44 * S, kZ + Math.sin(th - kn) * 0.32 * S + 0.05 * S, 0, 0, 0, 0.20 * S, 0.13 * S, 0.30 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, .17, .13, .11, 0, 0, .85);
+    pushInst(M.rbox, _cm, .17, .13, .11, fill, 0, .85);
   }
   // --- cape ---
   if (e.cape) {
     const cr = 0.18 + spd * 0.5 + Math.sin(t * 5) * 0.06 * spd;
     partMat(_cm, 0, hipY - rootY + 0.22 * S, -0.20 * S - spd * 0.1 * S, cr, 0, 0, 0.52 * S, 0.82 * S, 0.05 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, acc[0], acc[1], acc[2], glow * .4, 0, .55);
+    pushInst(M.rbox, _cm, acc[0], acc[1], acc[2], glow * .4 + fill, 0, .55);
   }
   // --- rarity aura for legendary / mythic gear ---
   if (glow > 0.35) {
-    if ((R.frame + (e.id | 0) * 7) % 3 === 0)
-      spawnPart(bx + (Math.random() - .5) * .7 * S, rootY + Math.random() * 1.7 * S, bz + (Math.random() - .5) * .7 * S,
-        0, .35 + Math.random() * .4, 0, .9, .17 * S, gr[0], gr[1], gr[2], .8, 0, .4, 0);
+    const every = glow > .8 ? 2 : 3;
+    if ((R.frame + (e.id | 0) * 7) % every === 0)
+      spawnPart(bx + (Math.random() - .5) * .9 * S, rootY + Math.random() * 1.9 * S, bz + (Math.random() - .5) * .9 * S,
+        0, .45 + Math.random() * .5, 0, 1.1, (glow > .8 ? .30 : .22) * S, gr[0], gr[1], gr[2], .95, 0, .3, 0);
   }
 }
 
@@ -553,6 +556,7 @@ function drawProps(px, pz, viewDist) {
   const c0 = Math.floor((px - viewDist) / CHUNK), c1 = Math.floor((px + viewDist) / CHUNK);
   const d0 = Math.floor((pz - viewDist) / CHUNK), d1 = Math.floor((pz + viewDist) / CHUNK);
   const vd2 = viewDist * viewDist;
+  const thinStart = viewDist * 0.42;
   for (let ci = c0; ci <= c1; ci++) for (let cj = d0; cj <= d1; cj++) {
     const cxp = ci * CHUNK + CHUNK / 2, czp = cj * CHUNK + CHUNK / 2;
     if (V.dist2(px, pz, cxp, czp) > (viewDist + CHUNK) * (viewDist + CHUNK)) continue;
@@ -561,7 +565,14 @@ function drawProps(px, pz, viewDist) {
     for (let i = 0; i < ch.trees.length; i++) {
       const p = ch.trees[i];
       const d2 = V.dist2(px, pz, p.x, p.z); if (d2 > vd2) continue;
-      const far = d2 > 160 * 160;
+      // thin distant woods deterministically: density falls off instead of
+      // popping at a hard edge, and the instance budget is never exhausted
+      const dn = Math.sqrt(d2);
+      if (dn > thinStart) {
+        const keep = 1 - smoothstep(thinStart, viewDist, dn) * 0.72;
+        if ((((i * 2654435761) ^ (ci * 40503) ^ (cj * 12289)) >>> 9) % 1024 > keep * 1024) continue;
+      }
+      const far = d2 > 150 * 150;
       const tc = TREE_COL[p.k];
       const h = 3.2 * p.s;
       M4.trs(_m, p.x, p.y, p.z, 0, p.r, 0, 0.62 * p.s, h, 0.62 * p.s);
@@ -615,9 +626,10 @@ function drawTowns(px, pz, viewDist) {
       // stone plinth
       M4.trs(_m, b.x, gy + .35, b.z, 0, b.rot, 0, b.w * 1.10, .7, b.d * 1.10);
       pushInst(M.box, _m, .38 * t, .36 * t, .33 * t, 0, 0, .96);
-      // plastered walls
+      // plastered walls — a hint of lamplight bounce keeps towns readable at night
+      const glowN = R.sky ? R.sky.night * 0.07 : 0;
       M4.trs(_m, b.x, gy + .6 + b.hgt * .5, b.z, 0, b.rot, 0, b.w, b.hgt, b.d);
-      pushInst(M.box, _m, .60 * t, .53 * t, .44 * t, 0, 0, .93);
+      pushInst(M.box, _m, .60 * t, .53 * t, .44 * t, glowN, 0, .93);
       // exposed timber frame: two horizontal bands
       for (const fy of [0.34, 0.74]) {
         M4.trs(_m, b.x, gy + .6 + b.hgt * fy, b.z, 0, b.rot, 0, b.w * 1.02, .22, b.d * 1.02);
@@ -640,7 +652,7 @@ function drawTowns(px, pz, viewDist) {
       }
       // windows — warm and lit after dusk
       const night = R.sky.night;
-      const wlit = night > .2 ? night * 1.5 : 0;
+      const wlit = night > .12 ? night * 3.0 : 0;
       const wc = wlit > 0 ? [1.0, .78, .38] : [.16, .19, .24];
       for (const sgn of [-1, 1]) {
         const cx2 = Math.cos(b.rot), sz2 = Math.sin(b.rot);
@@ -946,7 +958,7 @@ function renderScene(cam, dt) {
   gl.uniform1f(pp.u.uBloomAmt, bloomOn ? 0.42 : 0.0);
   gl.uniform1f(pp.u.uSharp, R.quality > 0 ? 0.34 : 0.0);
   gl.uniform1f(pp.u.uVig, 0.34);
-  gl.uniform1f(pp.u.uExposure, 1.06);
+  gl.uniform1f(pp.u.uExposure, 1.06 + (R.sky ? R.sky.night * 0.30 : 0));
   gl.uniform1f(pp.u.uFlash, R.flash);
   gl.uniform3fv(pp.u.uFlashCol, R.flashCol);
   gl.uniform1f(pp.u.uDamage, R.dmgVig);

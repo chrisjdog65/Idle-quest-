@@ -105,8 +105,8 @@ canvas{display:block;touch-action:none}
 #season b{color:var(--gold)}
 #gold{font-size:12px;color:var(--gold);background:rgba(8,12,20,.8);border:1px solid var(--edge2);border-radius:8px;padding:3px 8px;font-weight:800}
 /* ============================== QUEST TRACKER ============================== */
-#tracker{position:absolute;right:calc(6px + var(--sar));top:calc(150px + var(--sat));width:min(36vw,190px);font-size:11px;
-  max-height:min(30vh,calc(100vh - var(--sab) - var(--sat) - 366px));overflow:hidden;pointer-events:none;
+#tracker{position:absolute;right:calc(6px + var(--sar));top:calc(170px + var(--sat));width:min(36vw,190px);font-size:11px;
+  max-height:min(30vh,calc(100vh - var(--sab) - var(--sat) - 400px));overflow:hidden;pointer-events:none;
   mask-image:linear-gradient(180deg,#000 78%,transparent);-webkit-mask-image:linear-gradient(180deg,#000 78%,transparent)}
 .trk{background:linear-gradient(90deg,rgba(8,12,20,.0),rgba(8,12,20,.72) 22%);border-right:2px solid var(--edge2);padding:4px 6px 4px 10px;margin-bottom:4px;border-radius:4px}
 .trk .t{color:var(--gold);font-weight:700;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -276,11 +276,30 @@ h4.sec:first-child{margin-top:2px}
 .champ .cn{font-size:clamp(20px,6vw,34px);font-weight:900;color:#fff;letter-spacing:.06em;text-shadow:0 2px 12px rgba(240,194,87,.5)}
 .champ .cs{color:#c9bda0;font-size:12px}
 /* fps / debug */
-#perf{position:absolute;left:calc(6px + var(--sal));bottom:calc(2px + var(--sab));font-size:9px;color:#6a7386;pointer-events:none;
+#perf{position:absolute;left:calc(6px + var(--sal));top:calc(178px + var(--sat));bottom:auto;font-size:9px;color:#6a7386;pointer-events:none;
   font-family:ui-monospace,Menlo,monospace;opacity:.6;text-align:left;line-height:1.3;white-space:pre;display:none}
 #perf.on{display:block}
 #dpad{display:none}
 @media (min-width:900px){ #stick{opacity:.34} }
+/* Portrait: the menu bar runs the full width, so lift the ability cluster
+   clear of it instead of letting the two overlap. */
+@media (max-aspect-ratio: 4/5){
+  #acts{bottom:calc(54px + var(--sab));width:min(62vw,258px)}
+  #jump{bottom:calc(54px + var(--sab));right:calc(186px + var(--sar))}
+  #sprint{bottom:calc(114px + var(--sab));right:calc(189px + var(--sar))}
+  #interact{bottom:calc(250px + var(--sab))}
+  #chat{bottom:calc(258px + var(--sab));width:min(74vw,320px)}
+  #stick{bottom:calc(56px + var(--sab))}
+  #bar .mb{width:34px}
+  #tracker{top:calc(178px + var(--sat));max-height:min(26vh,calc(100vh - var(--sab) - var(--sat) - 470px))}
+  /* a centred target frame collides with the portrait frame and the minimap,
+     so stack it under the player frame instead */
+  #tframe{left:calc(6px + var(--sal));transform:none;top:calc(96px + var(--sat));width:min(62vw,250px)}
+  #autobtn{top:calc(158px + var(--sat))}
+  #autostate{top:calc(194px + var(--sat));max-width:52vw}
+  #perf{top:calc(238px + var(--sat))}
+  #castbar{bottom:38%}
+}
 .hidden{display:none!important}
 .center{text-align:center}
 .fadein{animation:fi .3s ease-out}
