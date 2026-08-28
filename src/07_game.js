@@ -15,6 +15,7 @@ const G = {
   zone: null, lastZone: -1,
   inRaid: null, raidStage: 0, raidT: 0,
   deathT: 0, resT: 0, victoryT: 0,
+  indoorB: null, indoorT: 0,
   toastQ: [],
 };
 
@@ -247,6 +248,7 @@ function makePlayer(name, clsId) {
   return p;
 }
 function playerLevelUp(p) {
+  const before = p.level;
   p.level++;
   p.st = calcStats(p);
   p.resMax = resourceMax(p);
@@ -258,6 +260,7 @@ function playerLevelUp(p) {
   for (let i = 0; i < 20; i++) spawnPart(p.x + (Math.random() - .5) * 2, p.y + Math.random() * 3, p.z + (Math.random() - .5) * 2, 0, 3 + Math.random() * 3, 0, 1.4, .35, 1, .9, .5, 1, 1, -1, 0);
   R.flash = .55; R.flashCol = [1, .85, .5];
   metaOnPlayerLevel(p.level);
+  if (before < ASCEND_LEVEL && p.level >= ASCEND_LEVEL) tryAscend(p);
 }
 function giveXP(p, amount) {
   const bonus = 1 + (p.af.schol || 0) * 0.01;
@@ -544,7 +547,7 @@ function rollLoot(p, srcLevel, quality, count) {
   const luck = (p.af.lucky || 0) * 0.01;
   for (let i = 0; i < (count || 1); i++) {
     let tier = rollTier(rng, quality, luck);
-    if (tier === 5 && (p.level < MYTHIC_MIN_LEVEL || quality < MYTHIC_MIN_SOURCE || !metaCanMythic(p))) tier = 4;
+    if (tier >= 5) tier = 4;                 // Mythic is awarded, never dropped
     const ilvl = Math.max(1, Math.round(srcLevel * 2.45 + rng.r(-4, 8) + tier * 3));
     const it = genItem(rng, ilvl, tier, rng.pick(SLOT_KEYS), p.cls);
     out.push(it);
@@ -1023,7 +1026,8 @@ function cameraBlocked(x, y, z) {
   for (const hub of POI.hubs) {
     if (V.dist2(x, z, hub.x, hub.z) > 110 * 110) continue;
     for (const b of hub.bld) {
-      const gy = groundH(b.x, b.z);
+      if (b === G.indoorB) continue;          // you are standing in this one
+      const gy = b.gy != null ? b.gy : groundH(b.x, b.z);
       if (y > gy + b.hgt + 1.4) continue;
       const rr = Math.max(b.w, b.d) * 0.56 + 0.5;
       if (V.dist2(x, z, b.x, b.z) < rr * rr) return true;
@@ -1040,10 +1044,14 @@ function cameraBlocked(x, y, z) {
   }
   return false;
 }
+const _cl = [0, 0], _cw = [0, 0];
 function updateCamera(dt, p) {
   const c = G.cam;
   const tgtY = p.y + 1.55 * (p.scale || 1);
-  let dist = G.camDist;
+  // indoors the room is only a few metres across, so pull the camera in
+  const wantDist = G.indoorB ? Math.min(G.camDist, 3.2) : G.camDist;
+  G.camDistCur = (G.camDistCur || G.camDist) + (wantDist - (G.camDistCur || G.camDist)) * damp(6, dt);
+  let dist = G.camDistCur;
   const pitch = G.camPitch;
   const yaw = G.camYaw;
   const ox = Math.sin(yaw) * Math.cos(pitch), oz = Math.cos(yaw) * Math.cos(pitch), oy = Math.sin(pitch);
@@ -1064,6 +1072,16 @@ function updateCamera(dt, p) {
   c.x += (wantX - c.x) * k; c.y += (wantY - c.y) * k; c.z += (wantZ - c.z) * k;
   const minY = groundH(c.x, c.z) + 0.55;
   if (c.y < minY) c.y = minY;
+  // Indoors the boom would happily push the camera out through a wall, so keep
+  // it inside the room instead — it slides along the walls rather than leaving.
+  if (G.indoorB) {
+    const b = G.indoorB;
+    bldLocal(b, c.x, c.z, _cl);
+    const mx = Math.max(0.2, b.w / 2 - WALL_T - 0.4), mz = Math.max(0.2, b.d / 2 - WALL_T - 0.4);
+    const lx = clamp(_cl[0], -mx, mx), lz = clamp(_cl[1], -mz, mz);
+    if (lx !== _cl[0] || lz !== _cl[1]) { bldWorld(b, lx, lz, _cw); c.x = _cw[0]; c.z = _cw[1]; }
+    c.y = clamp(c.y, b.gy + 0.55, b.gy + b.hgt - 0.4);
+  }
   c.tx = p.x; c.ty = tgtY + 0.25; c.tz = p.z;
   G.camShake = Math.max(0, G.camShake - dt * 2.4);
 }
@@ -1191,6 +1209,18 @@ function updatePlayer(dt, input) {
   }
   const hub = nearestPOI(p.x, p.z, 'hubs', 55);
   if (hub) { p.lastTownVisit = G.t; p.inTown = hub; } else p.inTown = null;
+  // are we inside a building? checked only near a town, so it is nearly free
+  const wasIn = G.indoorB;
+  G.indoorB = hub ? buildingAt(p.x, p.y + 0.9, p.z) : null;
+  if (G.indoorB !== wasIn) {
+    if (G.indoorB) {
+      const k = BLD_KINDS.find(x => x.k === G.indoorB.kind) || BLD_KINDS[4];
+      toast(k.ic + ' <b style="color:var(--gold)">' + esc(G.indoorB.n) + '</b><div class="tiny">' + k.n + '</div>', 'sys');
+      sfx('open', .7);
+    }
+    G.indoorT = 0;
+  }
+  G.indoorT += dt;
   const ruin = nearestPOI(p.x, p.z, 'ruins', 22);
   if (ruin) questProgress(p, 'explore', ruin.n, 1);
 }

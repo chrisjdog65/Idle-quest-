@@ -103,6 +103,9 @@ canvas{display:block;touch-action:none}
 #clock{position:absolute;left:0;right:0;top:2px;text-align:center;font-size:9px;color:#cbd3e2;text-shadow:0 1px 2px #000}
 #season{font-size:10px;color:#9aa3b4;background:rgba(8,12,20,.8);border:1px solid var(--edge2);border-radius:8px;padding:3px 7px;letter-spacing:.05em}
 #season b{color:var(--gold)}
+#season.final{border-color:#ff3f5f;color:#ffb9c4;animation:finalPulse 1.4s ease-in-out infinite}
+#season.final b{color:#ff6a80}
+@keyframes finalPulse{0%,100%{box-shadow:0 0 0 0 rgba(255,63,95,.55)}50%{box-shadow:0 0 0 7px rgba(255,63,95,0)}}
 #gold{font-size:12px;color:var(--gold);background:rgba(8,12,20,.8);border:1px solid var(--edge2);border-radius:8px;padding:3px 8px;font-weight:800}
 /* ============================== QUEST TRACKER ============================== */
 #tracker{position:absolute;right:calc(6px + var(--sar));top:calc(170px + var(--sat));width:min(36vw,190px);font-size:11px;

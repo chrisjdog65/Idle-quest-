@@ -17,11 +17,13 @@ const RARITY = [
   { n: 'Rare', c: '#3f8fe0', v: [.072, .098, .19, .27, .34, .33], mult: 1.68, af: 3, gv: 9 },
   { n: 'Epic', c: '#b45ef0', v: [.008, .012, .048, .14, .24, .33], mult: 2.25, af: 4, gv: 34 },
   { n: 'Legendary', c: '#ff9a1f', v: [.00012, .0002, .0011, .0090, .032, .080], mult: 3.15, af: 5, gv: 150 },
-  { n: 'Mythic', c: '#ff3f5f', v: [0, 0, .0000009, .000012, .00006, .00022], mult: 4.60, af: 6, gv: 900 },
+  { n: 'Mythic', c: '#ff3f5f', v: [0, 0, 0, 0, 0, 0], mult: 4.60, af: 6, gv: 900 },
 ];
-/* Mythic gear only exists at the very top of the world. */
-const MYTHIC_MIN_LEVEL = 200;
-const MYTHIC_MIN_SOURCE = 3;      // world boss or raid only
+/* Mythic gear is not a drop at all. It is the prize for being one of the first
+   three adventurers in the world to reach ASCEND_LEVEL — a race, not a lottery.
+   Once the third seat is claimed the season enters its final ten minutes. */
+const ASCEND_LEVEL = 200;
+const SEASON_GRACE_MS = 10 * 60 * 1000;
 const RCOL = RARITY.map(r => r.c);
 /** Only three souls in a season may ever bear Mythic ("Ascendant") gear. */
 const MYTHIC_LIMIT = 3;

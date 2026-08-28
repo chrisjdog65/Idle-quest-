@@ -12,7 +12,11 @@ const META_STEP = 0.5;                          // roster advance granularity (s
 
 const ROSTER = [];
 const GUILDS = [];
-const SEASON = { num: 1, start: 0, ended: false, champions: [] };
+const SEASON = { num: 1, start: 0, ended: false, champions: [], milestone: 0, ascended: [] };
+/* During offline catch-up the clock is simulated, so timestamps must come from
+   here rather than Date.now() or the ten-minute grace window is meaningless. */
+let META_NOW = 0;
+function metaNow() { return META_NOW || Date.now(); }
 const MYTHIC_HOLDERS = new Set();
 let metaAcc = 0, warT = 180, tradeT = 40, worldEventT = 300;
 
@@ -78,6 +82,8 @@ function buildRoster(seed) {
       g: -1, st: 'quest', act: rng.r(4, 40), skill,
       x: 0, z: 0, tx: 0, tz: 0,
       respect: 0, kills: 0, quests: 0, bosses: 0, raids: 0, deaths: 0, pvp: 0,
+      gen: clamp(0.15 + rng.f() * 0.8, 0.05, 0.98),   // how giving they are
+      rel: 0, asked: 0,                               // how they feel about you
       best: -1, av: null, title: rng.chance(.14) ? rng.pick(TITLE_BANK) : '',
       sk: rng.i(SKIN.length), hr: rng.i(HAIRC.length), z2: 0, online: 1,
       hof: 0, mythicAt: 0,
@@ -131,7 +137,9 @@ function advanceRec(rec, dt, fast) {
   const S = AI_STATE_BY[rec.st] || AI_STATES[0];
   const eff = rec.skill * (0.72 + Math.min(1.0, rec.gs / Math.max(1, refPrimary(rec.lv) * 5.2)) * 0.55) * S.xp;
   rec.lp += levelRate(rec.lv, eff) * dt;
+  const lvBefore = rec.lv;
   while (rec.lp >= 1) { rec.lp -= 1; rec.lv++; }
+  if (lvBefore < ASCEND_LEVEL && rec.lv >= ASCEND_LEVEL) tryAscend(rec, fast);
   rec.gold += (2.4 + rec.lv * 1.15) * S.gold * dt * 0.32;
   rec.kills += S.xp * dt * 0.42;
   if (S.k === 'quest') rec.quests += dt * 0.055;
@@ -145,7 +153,7 @@ function advanceRec(rec, dt, fast) {
   if (_mrng.f() < rate) {
     const slot = _mrng.i(15);
     let tier = rollTier(_mrng, S.q, rec.skill * 0.25);
-    if (tier === 5 && (rec.lv < MYTHIC_MIN_LEVEL || S.q < MYTHIC_MIN_SOURCE || !mythicAvailable(rec))) tier = 4;
+    if (tier >= 5) tier = 4;                   // Mythic is awarded, never dropped
     const ilvl = Math.max(1, Math.round(rec.lv * 2.45 + _mrng.r(-6, 10) + tier * 3));
     const newScore = ilvl * 1.15 * SLOTS[slot].w * RARITY[tier].mult * 2.1;
     const oldScore = rec.gt[slot] ? rec.gi[slot] * 1.15 * SLOTS[slot].w * RARITY[rec.gt[slot] - 1].mult * 2.1 : 0;
@@ -182,19 +190,56 @@ function mythicAvailable(who) {
   if (MYTHIC_HOLDERS.size < MYTHIC_LIMIT) return true;
   return MYTHIC_HOLDERS.has(who === G.player ? -1 : who.i);
 }
-function claimMythic(rec) {
-  const key = rec === G.player ? -1 : rec.i;
-  if (MYTHIC_HOLDERS.has(key)) return true;
+/** Dress a roster record in a full Mythic set at their current level. */
+function grantMythicSetRec(rec) {
+  const ilvl = Math.round(rec.lv * 2.45 + 40);
+  for (let i = 0; i < 15; i++) { rec.gt[i] = 6; rec.gi[i] = ilvl; }
+  rec.gs = recGearScore(rec);
+  rec.best = 5;
+}
+/** Dress the player in a full Mythic set; anything replaced goes to the bags. */
+function grantMythicSetPlayer() {
+  const p = G.player;
+  const rng = new RNG(((Date.now() ^ (p.level * 7919)) & 0x7fffffff) | 1);
+  const ilvl = Math.round(p.level * 2.45 + 40);
+  for (const k of SLOT_KEYS) {
+    const it = genItem(rng, ilvl, 5, k, p.cls);
+    const old = p.gear[k];
+    p.gear[k] = it;
+    if (old && p.bags.length < p.bagMax) p.bags.push(old);
+  }
+  p.mythic = 1;
+  p.st = calcStats(p); p.resMax = resourceMax(p); p.hp = p.st.hpMax;
+  styleFromGear(p, p.gear, p.cls);
+  uiDirty.bag = 1;
+}
+/** The race prize: the first three to ASCEND_LEVEL are crowned Ascendants. */
+function tryAscend(who, quiet) {
+  const isPlayer = who === G.player;
+  const key = isPlayer ? -1 : who.i;
+  if (MYTHIC_HOLDERS.has(key)) return false;
   if (MYTHIC_HOLDERS.size >= MYTHIC_LIMIT) return false;
   MYTHIC_HOLDERS.add(key);
-  rec.mythicAt = Date.now();
-  const nm = rec === G.player ? G.player.name : rec.n;
-  chatPush('world', '★ ' + nm + ' has become an ASCENDANT — ' + (MYTHIC_LIMIT - MYTHIC_HOLDERS.size) + ' Ascendant seat(s) remain this season.');
-  if (rec === G.player) { banner('ASCENDANT', 'You bear Mythic gear — one of only three'); R.flash = 1; R.flashCol = [1, .3, .4]; }
+  const place = MYTHIC_HOLDERS.size;
+  const nm = isPlayer ? G.player.name : who.n;
+  if (isPlayer) grantMythicSetPlayer(); else { who.mythicAt = metaNow(); grantMythicSetRec(who); }
+  SEASON.ascended.push({ n: nm, place, lv: who.lv || (isPlayer ? G.player.level : 0), at: metaNow(), isPlayer });
+  const ord = ['first', 'second', 'third'][place - 1] || place + 'th';
+  chatPush('world', '\u2605 ' + nm + ' is the ' + ord + ' adventurer to reach level ' + ASCEND_LEVEL +
+    ' \u2014 ASCENDANT, clad in Mythic. ' + (MYTHIC_LIMIT - place) + ' seat(s) left.');
+  if (isPlayer) { banner('ASCENDANT', 'Level ' + ASCEND_LEVEL + ' \u2014 you are Ascendant #' + place); R.flash = 1; R.flashCol = [1, .3, .4]; }
+  else if (!quiet) toast('<b class="q5">ASCENDANT</b><div class="tiny">' + esc(nm) + ' reached level ' + ASCEND_LEVEL + ' \u2014 seat ' + place + ' of ' + MYTHIC_LIMIT + '</div>', 'sys');
+
+  if (place >= MYTHIC_LIMIT && !SEASON.milestone) {
+    SEASON.milestone = metaNow();
+    chatPush('world', '\u2554\u2550 ALL ' + MYTHIC_LIMIT + ' ASCENDANT SEATS CLAIMED \u2014 the season ends in ' +
+      Math.round(SEASON_GRACE_MS / 60000) + ' minutes \u2550\u2557');
+    if (!quiet) { banner('FINAL ' + Math.round(SEASON_GRACE_MS / 60000) + ' MINUTES', 'Last push \u2014 level and gear crowns are decided now'); sfx('roar', 1); }
+  }
   return true;
 }
 function metaCanMythic(p) { return mythicAvailable(p); }
-function metaClaimMythic(p) { return claimMythic(p); }
+function metaClaimMythic(p) { return tryAscend(p); }
 
 /* ------------------------------ TICK ------------------------------ */
 function metaTick(dt) {
@@ -210,8 +255,14 @@ function metaTick(dt) {
   warT -= dt;
   if (warT <= 0) { warT = 150 + Math.random() * 200; runClanWar(); }
   // ---- trade chatter & offers ----
+  tickConvo(dt);
   tradeT -= dt;
-  if (tradeT <= 0) { tradeT = 22 + Math.random() * 40; postTradeOffer(); pruneOffers(); if (Math.random() < .45) makeIncomingOffer(); }
+  if (tradeT <= 0) {
+    tradeT = 22 + Math.random() * 40;
+    postTradeOffer(); pruneOffers();
+    if (Math.random() < .45) makeIncomingOffer();
+    if (Math.random() < .30) aiAskPlayer();
+  }
   // ---- world events ----
   worldEventT -= dt;
   if (worldEventT <= 0) { worldEventT = 240 + Math.random() * 300; worldEvent(); }
@@ -225,10 +276,14 @@ function metaOffline(ms) {
   const step = secs > 86400 ? 600 : secs > 3600 ? 240 : 30;
   const n = Math.min(Math.ceil(secs / step), 4200);
   const realStep = secs / n;
+  const startTs = Date.now() - secs * 1000;
   for (let s = 0; s < n; s++) {
+    META_NOW = startTs + s * realStep * 1000;      // simulated wall clock
     for (let i = 0; i < ROSTER.length; i++) advanceRec(ROSTER[i], realStep, true);
     if ((s % 12) === 0) runClanWar(true);
+    if (SEASON.milestone && META_NOW > SEASON.milestone + SEASON_GRACE_MS) break;
   }
+  META_NOW = 0;
   // scatter everyone to sensible places so the world looks lived-in on return
   for (const rec of ROSTER) {
     const pool = POI.camps;
@@ -362,6 +417,218 @@ function sellToBoard(bagIdx) {
   sfx('coin', 1);
   const buyer = ROSTER[(Math.random() * ROSTER.length) | 0];
   chatPush('trade', (buyer ? buyer.n : 'A merchant') + ' bought your [' + it.n + '] for ' + fmt(price) + 'g');
+  return true;
+}
+
+/* ------------------------------ SOCIAL: GIVE & ASK ------------------------------ */
+/* Adventurers have a generosity trait and remember how you have treated them.
+   Ask one for gold and sometimes they hand it over, sometimes they tell you to
+   get lost — and they will ask you for things right back. */
+
+const CONVO = [];        // pending replies, resolved on game time so tabs can throttle
+const PENDING = [];      // requests AI adventurers have made of you
+
+const YES_GOLD = [
+  'sure, grabbed plenty today. sending it over',
+  'yeah np, pay it forward some time',
+  'take it, i just cleared a raid',
+  'ha, you caught me in a good mood',
+  'fine fine, here. dont spend it all in the inn',
+  'we are in the same clan basically. here',
+];
+const NO_GOLD = [
+  'sorry, saving for a mount',
+  'lol no',
+  'i literally just repaired, im broke',
+  'ask someone in a bigger clan',
+  'nah im good thanks',
+  'do i look like a bank',
+  'maybe when you hit my level',
+];
+const YES_ITEM = [
+  'actually yeah, this is dead weight for me. take it',
+  'i replaced this an hour ago, all yours',
+  'sure, its not my spec anyway',
+  'here, dont sell it for 3g',
+];
+const NO_ITEM = [
+  'cant, saving it for my offspec',
+  'that one is bis for me sorry',
+  'nothing spare right now',
+  'i vendor everything, sorry',
+  'i would but ive got nothing you could use',
+];
+const THANKS = ['thanks!! genuinely', 'oh nice, appreciate it', 'legend. ty', 'wasnt expecting that, cheers', 'ty ty ty'];
+const AI_ASK_GOLD = [
+  'hey, any chance you can spare {g}? repair bill is brutal',
+  'short {g} for a mount, help a guy out?',
+  'wtb {g} loan, ill pay back i promise',
+  'got {g} spare? getting destroyed out here',
+];
+const AI_ASK_ITEM = [
+  'saw your gear — got anything spare for a {c}?',
+  'any old gear you dont need? im running greens still',
+  'ill take literally any upgrade if youve got a spare',
+];
+
+function relOf(rec) { return rec.rel || 0; }
+function convoSay(rec, text, kind) {
+  chatPush(kind || 'say', '[' + rec.n + '] whispers: ' + text);
+}
+function queueReply(rec, secs, fn) { CONVO.push({ rec, t: secs, fn }); }
+function tickConvo(dt) {
+  for (let i = CONVO.length - 1; i >= 0; i--) {
+    const c = CONVO[i];
+    c.t -= dt;
+    if (c.t <= 0) { CONVO.splice(i, 1); try { c.fn(); } catch (e) { console.warn(e); } }
+  }
+}
+
+/** Gold an adventurer would plausibly part with. */
+function askAmountFor(rec) {
+  return Math.max(25, Math.round(Math.min(rec.gold * 0.18, 200 + rec.lv * 90)));
+}
+/** Ask an adventurer for gold. Sometimes yes, sometimes no — like a real player. */
+function askForGold(rec) {
+  const p = G.player;
+  rec.asked = (rec.asked || 0) + 1;
+  const amount = askAmountFor(rec);
+  chatPush('say', '[You] whisper ' + rec.n + ': any chance you could spare some gold?');
+  toast('<span class="tiny">' + esc(rec.n) + ' is typing…</span>', 'sys');
+  queueReply(rec, 1.2 + Math.random() * 2.8, () => {
+    const afford = rec.gold > amount * 2.2;
+    let chance = 0.10 + rec.gen * 0.55 + clamp(relOf(rec), -1, 1) * 0.30;
+    chance -= Math.min(0.45, (rec.asked - 1) * 0.18);           // pestering wears thin
+    if (!afford) chance *= 0.25;
+    if (Math.random() < chance) {
+      rec.gold = Math.max(0, rec.gold - amount);
+      giveGold(p, amount);
+      rec.rel = relOf(rec) - 0.12;
+      convoSay(rec, pickOf(YES_GOLD) + ' (+' + fmt(amount) + 'g)', 'trade');
+      toast('<b style="color:var(--gold)">' + esc(rec.n) + ' sent you ' + fmt(amount) + 'g</b>', 'sys');
+      sfx('coin', 1);
+    } else {
+      rec.rel = relOf(rec) - 0.05;
+      convoSay(rec, pickOf(NO_GOLD));
+      sfx('error', .5);
+    }
+    if (PANEL) renderPanel();
+  });
+}
+/** Ask an adventurer for an item. */
+function askForItem(rec) {
+  const p = G.player;
+  rec.asked = (rec.asked || 0) + 1;
+  chatPush('say', '[You] whisper ' + rec.n + ': got any spare gear you could pass me?');
+  toast('<span class="tiny">' + esc(rec.n) + ' is typing…</span>', 'sys');
+  queueReply(rec, 1.4 + Math.random() * 3.2, () => {
+    let chance = 0.06 + rec.gen * 0.42 + clamp(relOf(rec), -1, 1) * 0.32;
+    chance -= Math.min(0.40, (rec.asked - 1) * 0.16);
+    if (Math.random() < chance) {
+      const rng = new RNG((Math.random() * 1e9) | 0);
+      // they hand over something from their own level bracket, never their best
+      const tier = rng.wpick([0, 1, 2, 3], [.18, .40, .32, .10]);
+      const ilvl = Math.max(1, Math.round(rec.lv * 2.45 * rng.r(.72, .98)));
+      const it = genItem(rng, ilvl, tier, rng.pick(SLOT_KEYS), p.cls);
+      giveItem(p, it);
+      rec.rel = relOf(rec) - 0.15;
+      convoSay(rec, pickOf(YES_ITEM), 'trade');
+      toast('<b style="color:var(--gold)">' + esc(rec.n) + ' sent you</b> <span class="q' + it.t + '">' + esc(it.n) + '</span>', 'sys');
+    } else {
+      rec.rel = relOf(rec) - 0.05;
+      convoSay(rec, pickOf(NO_ITEM));
+      sfx('error', .5);
+    }
+    if (PANEL) renderPanel();
+  });
+}
+function pickOf(a) { return a[(Math.random() * a.length) | 0]; }
+
+/** Send gold to an adventurer. They notice, and they remember. */
+function sendGold(rec, amount) {
+  const p = G.player;
+  amount = Math.max(1, Math.min(Math.floor(amount), p.gold));
+  if (amount < 1) { toast('You have no gold to send.', 'sys'); sfx('error', .6); return false; }
+  p.gold -= amount;
+  rec.gold += amount;
+  rec.rel = relOf(rec) + Math.min(0.6, amount / Math.max(400, p.gold + amount) * 1.4 + 0.12);
+  p.stats.goldGiven = (p.stats.goldGiven || 0) + amount;
+  chatPush('trade', 'You sent ' + fmt(amount) + 'g to ' + rec.n);
+  sfx('coin', 1);
+  queueReply(rec, 0.9 + Math.random() * 2.2, () => convoSay(rec, pickOf(THANKS), 'trade'));
+  return true;
+}
+/** Send an item from your bags to an adventurer. */
+function sendItem(rec, bagIdx) {
+  const p = G.player, it = p.bags[bagIdx];
+  if (!it) return false;
+  p.bags.splice(bagIdx, 1);
+  rec.rel = relOf(rec) + 0.18 + Math.min(0.4, it.t * 0.09);
+  p.stats.itemsGiven = (p.stats.itemsGiven || 0) + 1;
+  // it actually lands on them: if it beats what they have, they wear it
+  const si = SLOT_BY[it.sl].i;
+  const oldScore = rec.gt[si] ? rec.gi[si] * 1.15 * SLOTS[si].w * RARITY[rec.gt[si] - 1].mult * 2.1 : 0;
+  const newScore = it.il * 1.15 * SLOTS[si].w * RARITY[it.t].mult * 2.1;
+  let worn = false;
+  if (newScore > oldScore) { rec.gt[si] = it.t + 1; rec.gi[si] = it.il; rec.gs = recGearScore(rec); worn = true; }
+  else rec.gold += it.val;
+  chatPush('trade', 'You sent [' + it.n + '] to ' + rec.n);
+  sfx('coin', 1);
+  queueReply(rec, 0.9 + Math.random() * 2.4, () =>
+    convoSay(rec, worn ? pickOf(THANKS) + ' equipping it now' : pickOf(THANKS), 'trade'));
+  uiDirty.bag = 1;
+  return true;
+}
+
+/* ---- adventurers asking YOU for things ---- */
+function aiAskPlayer() {
+  const p = G.player;
+  if (!p || PENDING.length > 3) return;
+  const near = ROSTER.filter(r => V.dist2(r.x, r.z, p.x, p.z) < 220 * 220);
+  const pool = near.length ? near : ROSTER;
+  const rec = pool[(Math.random() * pool.length) | 0];
+  if (!rec || rec.lv > p.level + 30) return;
+  const wantItem = p.bags.length > 2 && Math.random() < 0.42;
+  const amount = Math.max(50, Math.round((60 + p.level * 45) * (0.6 + Math.random())));
+  if (!wantItem && p.gold < amount * 3) return;
+  const msg = wantItem
+    ? pickOf(AI_ASK_ITEM).replace('{c}', CLASS_BY[rec.c].n.toLowerCase())
+    : pickOf(AI_ASK_GOLD).replace(/\{g\}/g, fmt(amount) + 'g');
+  const req = { id: (Math.random() * 1e9) | 0, rid: rec.i, kind: wantItem ? 'item' : 'gold', amount, msg, t: Date.now() };
+  PENDING.push(req);
+  chatPush('say', '[' + rec.n + '] whispers: ' + msg);
+  toast('<b style="color:#f0a63c">' + esc(rec.n) + '</b> <span class="tiny">' + esc(msg) + '</span>' +
+    '<div class="tiny">Social → Whispers to answer</div>', 'sys');
+  sfx('ui', .8, 1.4);
+}
+function answerRequest(id, accept) {
+  const p = G.player;
+  const i = PENDING.findIndex(r => r.id === id);
+  if (i < 0) return false;
+  const req = PENDING[i];
+  const rec = ROSTER[req.rid];
+  PENDING.splice(i, 1);
+  if (!rec) return false;
+  if (!accept) {
+    rec.rel = relOf(rec) - 0.10;
+    queueReply(rec, 0.8 + Math.random() * 1.6, () => convoSay(rec, pickOf(['all good, worth a shot', 'np', 'fair enough', 'cheers anyway'])));
+    if (PANEL) renderPanel();
+    return true;
+  }
+  if (req.kind === 'gold') { if (!sendGold(rec, req.amount)) return false; }
+  else {
+    // give away the least useful thing in the bag
+    let worst = -1;
+    for (let k = 0; k < p.bags.length; k++) {
+      const cur = p.gear[p.bags[k].sl === 'ring2' ? 'ring1' : p.bags[k].sl];
+      if (cur && p.bags[k].sc > cur.sc) continue;                 // never give an upgrade away
+      if (worst < 0 || p.bags[k].sc < p.bags[worst].sc) worst = k;
+    }
+    if (worst < 0) { toast('Nothing spare to give.', 'sys'); sfx('error', .6); return false; }
+    sendItem(rec, worst);
+  }
+  rec.rel = relOf(rec) + 0.25;
+  if (PANEL) renderPanel();
   return true;
 }
 
@@ -646,7 +913,13 @@ function guildStats(g) {
 }
 
 /* ------------------------------ SEASON ------------------------------ */
-function seasonLeft() { return Math.max(0, SEASON.start + SEASON_MS - Date.now()); }
+function seasonLeft() {
+  const byClock = SEASON.start + SEASON_MS - Date.now();
+  if (SEASON.milestone) return Math.max(0, Math.min(byClock, SEASON.milestone + SEASON_GRACE_MS - Date.now()));
+  return Math.max(0, byClock);
+}
+/** True once the third Ascendant is crowned and the ten-minute clock is live. */
+function seasonFinalCall() { return !!SEASON.milestone && !SEASON.ended; }
 function checkSeason() {
   if (SEASON.ended) return;
   if (seasonLeft() > 0) return;
@@ -654,19 +927,32 @@ function checkSeason() {
 }
 function endSeason() {
   SEASON.ended = true;
-  const hof = hallOfFame(100);
-  const champ = hof[0];
-  const gHall = guildHall(20);
+  const all = hallOfFame(POP + 1);
+  // two separate crowns: highest level, and greatest gear power
+  const byLevel = all.slice().sort((a, b) => (b.lv - a.lv) || (b.gs - a.gs))[0];
+  const byGear = all.slice().sort((a, b) => (b.gs - a.gs) || (b.lv - a.lv))[0];
+  const capsule = r => ({
+    n: r.n, lv: r.lv, gs: r.gs, c: r.c, best: r.best,
+    guild: r.g >= 0 && GUILDS[r.g] ? GUILDS[r.g].n : '', isPlayer: !!r.isPlayer,
+  });
+  // top guild is crowned purely on respect, as its own title
+  const byRespect = GUILDS.slice().sort((a, b) => b.respect - a.respect)[0];
   const rec = {
     num: SEASON.num, ended: Date.now(),
-    champ: { n: champ.n, lv: champ.lv, gs: champ.gs, c: champ.c, best: champ.best, guild: champ.g >= 0 && GUILDS[champ.g] ? GUILDS[champ.g].n : '', isPlayer: !!champ.isPlayer },
-    guild: gHall[0] ? { n: gHall[0].n, respect: Math.round(gHall[0].respect) } : null,
-    top: hof.slice(0, 10).map(r => ({ n: r.n, lv: r.lv, gs: r.gs, isPlayer: !!r.isPlayer })),
-    playerRank: hallOfFame(POP + 1).findIndex(r => r.isPlayer) + 1,
+    champ: capsule(byLevel),
+    gearChamp: capsule(byGear),
+    sweep: byLevel.n === byGear.n && byLevel.isPlayer === byGear.isPlayer,
+    guild: byRespect ? { n: byRespect.n, respect: Math.round(byRespect.respect),
+      members: byRespect.members.length, wins: byRespect.wins, isPlayerGuild: !!byRespect.playerGuild } : null,
+    ascended: SEASON.ascended.slice(),
+    top: all.slice(0, 10).map(r => ({ n: r.n, lv: r.lv, gs: r.gs, isPlayer: !!r.isPlayer })),
+    playerRank: all.findIndex(r => r.isPlayer) + 1,
+    playerGearRank: all.slice().sort((a, b) => b.gs - a.gs).findIndex(r => r.isPlayer) + 1,
     playerLv: G.player ? G.player.level : 0,
   };
   SEASON.champions.unshift(rec);
-  if (SEASON.champions.length > 20) SEASON.champions.pop();
+  // the roll of champions is permanent — every season ever played, kept forever
+  if (SEASON.champions.length > 400) SEASON.champions.pop();
   showSeasonEnd(rec);
   musicSet('victory', true);
   saveGame();
@@ -675,6 +961,8 @@ function startNewSeason() {
   SEASON.num++;
   SEASON.start = Date.now();
   SEASON.ended = false;
+  SEASON.milestone = 0;
+  SEASON.ascended = [];
   MYTHIC_HOLDERS.clear();
   buildRoster(SEED ^ (SEASON.num * 7919));
   for (const k in RAID_LOCK) delete RAID_LOCK[k];

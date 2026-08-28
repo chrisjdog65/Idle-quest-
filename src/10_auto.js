@@ -80,6 +80,11 @@ const AUTO = {
         let added = 0;
         for (const q of av) { if (p.quests.length >= MAX_QUESTS || added >= 4) break; if (acceptQuest(p, q.id)) added++; }
       }
+      // answer anyone who has whispered asking for something
+      for (const req of PENDING.slice()) {
+        if (req.kind === 'gold') answerRequest(req.id, p.gold > req.amount * 12);
+        else answerRequest(req.id, p.bags.length > 6);
+      }
       // clan life
       if (p.guild == null) {
         if (p.gold >= 12000 && p.level > 20) foundGuild(p.name + '\'s Vanguard');

@@ -16,11 +16,32 @@ raids, trading, joining clans and fighting clan wars. You see them running past 
 their names, levels, guild tags and gear glow, chatting in world and trade channels.
 They keep playing whether your browser is open or not.
 
-Every **seven real days** the world ends. The highest, best-geared, most accomplished
-adventurer is crowned **Idle Quest Champion**, their name goes into the Hall of Fame
-forever, and everyone — you included — restarts at level 1 with nothing.
+You can walk into the buildings — inn, forge, market, temple, hall — and see what is
+inside them. You can click any adventurer you pass and hand them gold or an item, or ask
+them for one, and they will decide for themselves whether to say yes. They ask you back.
 
-There is no level cap and no item cap. The only limit is the seven-day clock.
+### How a season ends
+
+The season is a **race to level 200**. The first three adventurers in the world to reach
+it become the **Ascendants** and are handed a full set of **Mythic** gear — the only
+Mythic that exists. Nobody else can ever obtain it.
+
+The moment the third seat is claimed, a **ten-minute final call** starts. Everyone gets
+those last ten minutes to climb and to loot, and then the world ends and crowns three
+titles:
+
+- **Champion of Levels** — the highest level in the world
+- **Champion of Might** — the greatest total gear power
+- **Crowned Clan** — the guild with the most respect
+
+If one adventurer takes both individual crowns it is announced as a **sweep**. Every
+season's winners are written into a permanent archive that survives the wipe and every
+season after it, and then everyone — you included — restarts at level 1 with nothing.
+
+A **seven real day** clock still runs as an outer backstop: if nobody reaches level 200
+in a week, the season ends on the timer and crowns the same three titles.
+
+There is no level cap and no item cap.
 
 ### Auto Quest
 
@@ -36,13 +57,15 @@ earning while the tab is closed. Turn it off any time and take over mid-fight.
 | | |
 |---|---|
 | **World** | 12 zones, continuous heightfield, rivers, lakes, an ocean rim, a road network linking 12 towns, day/night cycle |
+| **Buildings** | Every town building can be entered — inns, forges, markets, temples and halls, each furnished inside, with the camera pulling in to the room |
 | **Content** | 660 quests, 100 world bosses with named mechanics, 60 raids (5- to 40-player, 3–9 encounters each) |
 | **Population** | 1000 AI adventurers across 6 classes and 48 clans, simulated online and offline |
 | **Items** | Procedurally generated across 6 rarity tiers — Common, Uncommon, Rare, Epic, Legendary, **Mythic** — with unbounded item level, 11 stats and 16 affixes |
-| **Ascendants** | Only **3 adventurers in the entire world** may ever hold Mythic gear in a season. Seats are claimed first-come and never released |
-| **Progression** | No level cap. No gear cap. A weekly wipe is the only ceiling |
+| **Ascendants** | Mythic is not a drop. The **first 3 adventurers to reach level 200** are handed it, and claiming the third seat starts the season's ten-minute final call |
+| **Progression** | No level cap. No gear cap. The race to 200 is the ceiling |
 | **Social** | Clans with respect points, automatic clan wars, a live trade post, incoming trade offers, world/guild/trade chat |
-| **Leaderboards** | Hall of Fame top 100 (level, class, gear score, best rarity, clan, gold), top 20 clans with full rosters, the Ascendant registry, and every past season's champion |
+| **Whispers** | Click any adventurer to give them gold or an item, or to ask them for one. They answer in their own voice and can refuse — and they whisper you with requests of their own |
+| **Leaderboards** | Hall of Fame top 100 (level, class, gear score, best rarity, clan, gold), top 20 clans with full rosters, the Ascendant registry, and a permanent archive of every past season's three crowns |
 | **Audio** | A live procedural orchestral score — motif-based composition that changes for towns, wilds, combat, bosses, raids, night and victory. Not a single recorded sample |
 | **Graphics** | Custom WebGL2 renderer: MSAA, HDR pipeline, fitted shadow maps with PCF, instanced geometry, wind-animated grass, animated water with fresnel and sun glints, volumetric-ish sky with clouds and stars, ACES tonemapping, bloom and an unsharp pass for crisp phone panels |
 | **Mobile** | Built for touch first: dynamic virtual stick, swipe camera, pinch zoom, tap-to-target, safe-area aware, three quality tiers with resolution scaling |
@@ -53,7 +76,8 @@ earning while the tab is closed. Turn it off any time and take over mid-fight.
 
 **Touch** — drag anywhere on the left half to move (push to the edge to sprint), swipe
 on the right to look, pinch to zoom, tap an enemy to target it, tap an adventurer to
-inspect them. Abilities are bottom-right; the menu bar is bottom-centre.
+inspect them — the inspect sheet is where you give, ask and whisper. Walk through a
+doorway to go inside. Abilities are bottom-right; the menu bar is bottom-centre.
 
 **Keyboard** — `WASD` move, `Shift` sprint, `Space` jump, `1`–`6` abilities,
 `Tab` target nearest, `F` toggle Auto Quest, `Esc` close panel.

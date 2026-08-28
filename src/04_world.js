@@ -109,7 +109,9 @@ function groundH(x, z) {
     const f = FLATS[i];
     const d = Math.hypot(x - f.x, z - f.z);
     if (d < f.r) {
-      const t = 1 - smoothstep(f.r * 0.45, f.r, d);
+      // Wide flat core: every town building must stand on genuinely level
+      // ground, or the terrain pokes up through its floorboards.
+      const t = 1 - smoothstep(f.r * 0.78, f.r, d);
       h = lerp(h, f.h, t);
     }
   }
@@ -118,6 +120,21 @@ function groundH(x, z) {
     // roads smooth the terrain toward a locally-averaged height
     const avg = (terrainH(x + 9, z) + terrainH(x - 9, z) + terrainH(x, z + 9) + terrainH(x, z - 9)) * 0.25;
     h = lerp(h, (h + avg) * 0.5, (1 - smoothstep(6, 13, rd)) * 0.85);
+  }
+  // Level pads under town buildings, applied last so neither the platform edge
+  // nor a road running through town can tilt a floor and push terrain up
+  // through the floorboards. Only tested when actually inside a town.
+  for (let i = 0; i < FLATS.length; i++) {
+    const f = FLATS[i];
+    if (!f.bld) continue;
+    if (Math.abs(x - f.x) > f.r || Math.abs(z - f.z) > f.r) continue;
+    for (let k = 0; k < f.bld.length; k++) {
+      const b = f.bld[k], pr = b.padR;
+      const dx = x - b.x, dz = z - b.z;
+      if (dx > pr || dx < -pr || dz > pr || dz < -pr) continue;
+      const bd = Math.hypot(dx, dz);
+      if (bd < pr) h = lerp(h, b.gy, 1 - smoothstep(pr * 0.55, pr, bd));
+    }
   }
   return h;
 }
@@ -173,6 +190,138 @@ function groundColor(x, z, h, slope, out) {
   return out;
 }
 
+/* ------------------------------ BUILDINGS ------------------------------ */
+/* Town buildings are hollow: four walls with a doorway, a floor, a ceiling and
+   a furnished interior you can walk into. Everything is generated once at boot
+   and stored on the building, so runtime cost is a couple of array reads. */
+const BLD_KINDS = [
+  { k: 'inn', n: 'Inn', ic: '🍺' },
+  { k: 'smith', n: 'Smithy', ic: '🔨' },
+  { k: 'shop', n: 'Trading Post', ic: '🪙' },
+  { k: 'temple', n: 'Shrine', ic: '✨' },
+  { k: 'house', n: 'Cottage', ic: '🏠' },
+];
+const INN_NAMES = ['The Gilded Stag', 'The Broken Shield', 'The Salty Wyrm', 'The Last Lantern', 'The Drowned Crow',
+  'The Hearth & Hammer', 'The Sleeping Giant', 'The Copper Kettle', 'The Wandering Boar', 'The Quiet Hound'];
+const SMITH_NAMES = ['Ironhand Smithy', 'Emberfall Forge', 'Grimsteel Works', 'The Anvil', 'Blackhearth Smithy'];
+const SHOP_NAMES = ['General Goods', 'Trading Post', 'The Full Pack', 'Sundries & Salvage', 'Provisioner'];
+const TEMPLE_NAMES = ['Shrine of the Dawn', 'Chapel of Quiet Light', 'The Standing Stone', 'Shrine of the Long Road'];
+const HOUSE_OWNERS = ['Bram', 'Elda', 'Corin', 'Mabel', 'Toft', 'Hesta', 'Odren', 'Wynne', 'Garrick', 'Sela'];
+
+const WALL_T = 0.30;             // half thickness of a wall slab
+const DOOR_W = 2.7;              // doorway width
+
+/** Wall rectangles in building-local space; the front wall is split by a door. */
+function makeWallRects(b) {
+  const hw = b.w / 2, hd = b.d / 2, t = WALL_T, dw = DOOR_W / 2;
+  const side = Math.max(0.25, (hw - dw) / 2);
+  return [
+    { cx: 0, cz: -hd, hx: hw, hz: t },                    // back
+    { cx: -hw, cz: 0, hx: t, hz: hd },                    // left
+    { cx: hw, cz: 0, hx: t, hz: hd },                     // right
+    { cx: -(hw + dw) / 2, cz: hd, hx: side, hz: t },      // front, left of the door
+    { cx: (hw + dw) / 2, cz: hd, hx: side, hz: t },       // front, right of the door
+  ];
+}
+/** world -> building-local */
+function bldLocal(b, x, z, out) {
+  const dx = x - b.x, dz = z - b.z;
+  const c = b.cr, sn = b.sr;
+  out[0] = c * dx - sn * dz;
+  out[1] = sn * dx + c * dz;
+  return out;
+}
+/** building-local -> world */
+function bldWorld(b, lx, lz, out) {
+  const c = b.cr, sn = b.sr;
+  out[0] = b.x + c * lx + sn * lz;
+  out[1] = b.z - sn * lx + c * lz;
+  return out;
+}
+const prop = (x, y, z, sx, sy, sz, col, e, m, rot) =>
+  ({ x, y, z, sx, sy, sz, c: col, e: e || 0, m: m || 'box', r: rot || 0 });
+const WOOD = [.34, .22, .13], DARKWOOD = [.22, .14, .09];
+const STONE = [.42, .40, .37], METAL = [.48, .50, .55], LINEN = [.72, .68, .56];
+
+/** Furnish a building. Coordinates are local; y is height above the floor. */
+function furnish(b, rng) {
+  const hw = b.w / 2 - 0.6, hd = b.d / 2 - 0.6, pr = [];
+  const lampY = Math.min(b.hgt - 0.7, 2.6);
+  switch (b.kind) {
+    case 'inn': {
+      pr.push(prop(0, 0.55, -hd + 0.5, b.w * 0.62, 1.1, 0.7, WOOD));                    // bar
+      pr.push(prop(0, 1.16, -hd + 0.5, b.w * 0.66, 0.12, 0.9, DARKWOOD));               // bar top
+      for (let i = 0; i < 3; i++) {
+        const bx = rng.r(-hw + .8, hw - .8), bz = rng.r(-hd + 1.6, hd - 1.0);
+        pr.push(prop(bx, 0.72, bz, 1.1, 0.12, 1.1, DARKWOOD));                          // table top
+        pr.push(prop(bx, 0.36, bz, 0.22, 0.72, 0.22, WOOD));                            // pedestal
+        for (let k = 0; k < 2; k++) {
+          const a = rng.f() * TAU;
+          pr.push(prop(bx + Math.cos(a) * 1.0, 0.28, bz + Math.sin(a) * 1.0, 0.42, 0.56, 0.42, WOOD));
+        }
+      }
+      for (let i = 0; i < 3; i++) pr.push(prop(-hw + 0.45, 0.45, rng.r(-hd + .6, hd - .6), 0.7, 0.9, 0.7, DARKWOOD, 0, 'cyl'));
+      pr.push(prop(hw - 0.5, 1.0, -hd + 1.2, 0.9, 2.0, 0.9, STONE));                    // hearth stack
+      pr.push(prop(hw - 0.5, 0.5, -hd + 1.2, 0.7, 0.6, 0.7, [1, .5, .15], 1.9, 'sph')); // fire
+      b.fire = { x: hw - 0.5, y: 0.5, z: -hd + 1.2 };
+      break;
+    }
+    case 'smith': {
+      pr.push(prop(0, 0.4, 0.2, 0.9, 0.8, 0.6, STONE));                                 // anvil block
+      pr.push(prop(0, 0.92, 0.2, 1.15, 0.28, 0.42, METAL));                             // anvil
+      pr.push(prop(-hw + 0.8, 0.7, -hd + 0.8, 1.6, 1.4, 1.4, STONE));                   // forge
+      pr.push(prop(-hw + 0.8, 1.05, -hd + 0.8, 0.9, 0.7, 0.9, [1, .45, .1], 2.4, 'sph'));
+      b.fire = { x: -hw + 0.8, y: 1.05, z: -hd + 0.8 };
+      pr.push(prop(hw - 0.6, 0.35, -hd + 1.0, 1.0, 0.7, 1.4, [.2, .3, .38]));           // quench trough
+      pr.push(prop(hw - 0.5, 1.1, hd - 1.2, 0.2, 2.2, 1.6, WOOD));                      // rack
+      for (let i = 0; i < 3; i++) pr.push(prop(hw - 0.62, 1.4 + i * 0.1, hd - 1.7 + i * 0.5, 0.09, 1.3, 0.09, METAL, 0, 'box', 0.25));
+      break;
+    }
+    case 'shop': {
+      pr.push(prop(0, 0.55, 0.6, b.w * 0.66, 1.1, 0.7, WOOD));
+      pr.push(prop(0, 1.16, 0.6, b.w * 0.70, 0.12, 0.9, DARKWOOD));
+      for (let sh = 0; sh < 3; sh++) {
+        pr.push(prop(0, 0.7 + sh * 0.75, -hd + 0.45, b.w * 0.72, 0.1, 0.5, WOOD));
+        for (let i = 0; i < 4; i++) {
+          pr.push(prop(rng.r(-hw + .5, hw - .5), 0.92 + sh * 0.75, -hd + 0.45, 0.3, 0.34, 0.3,
+            [rng.r(.3, .9), rng.r(.3, .9), rng.r(.3, .9)]));
+        }
+      }
+      for (let i = 0; i < 3; i++) pr.push(prop(rng.r(-hw + .5, hw - .5), 0.35, hd - 0.8, 0.7, 0.7, 0.7, WOOD));
+      break;
+    }
+    case 'temple': {
+      pr.push(prop(0, 0.5, -hd + 0.9, 1.8, 1.0, 0.9, STONE));                           // altar
+      pr.push(prop(0, 1.25, -hd + 0.9, 0.7, 0.5, 0.7, [1, .92, .6], 2.2, 'sph'));       // holy light
+      b.fire = { x: 0, y: 1.25, z: -hd + 0.9, cold: 1 };
+      for (let i = 0; i < 4; i++) {
+        const pz = -hd + 2.3 + i * 1.0;
+        if (pz > hd - 0.6) break;
+        pr.push(prop(0, 0.42, pz, b.w * 0.6, 0.16, 0.4, DARKWOOD));
+        pr.push(prop(0, 0.2, pz, b.w * 0.55, 0.4, 0.14, WOOD));
+      }
+      for (const sx of [-1, 1]) pr.push(prop(sx * (hw - 0.5), 0.6, -hd + 0.9, 0.35, 1.2, 0.35, STONE, 0, 'cyl'));
+      break;
+    }
+    default: {                                                                        // cottage
+      pr.push(prop(-hw + 0.9, 0.3, -hd + 0.9, 1.1, 0.6, 2.1, WOOD));                    // bed frame
+      pr.push(prop(-hw + 0.9, 0.66, -hd + 0.9, 1.15, 0.2, 2.0, LINEN));                 // bedding
+      pr.push(prop(-hw + 0.9, 0.78, -hd + 1.7, 0.9, 0.22, 0.5, [.85, .85, .88]));       // pillow
+      pr.push(prop(hw - 1.2, 0.72, 0.4, 1.3, 0.12, 0.9, DARKWOOD));                     // table
+      pr.push(prop(hw - 1.2, 0.36, 0.4, 0.2, 0.72, 0.2, WOOD));
+      for (const sz of [-1, 1]) pr.push(prop(hw - 1.2, 0.26, 0.4 + sz * 0.9, 0.42, 0.52, 0.42, WOOD));
+      pr.push(prop(hw - 0.55, 0.9, -hd + 1.0, 0.8, 1.8, 0.8, STONE));                   // hearth
+      pr.push(prop(hw - 0.55, 0.45, -hd + 1.0, 0.6, 0.5, 0.6, [1, .5, .15], 1.7, 'sph'));
+      b.fire = { x: hw - 0.55, y: 0.45, z: -hd + 1.0 };
+      pr.push(prop(-hw + 0.7, 0.35, hd - 0.9, 0.8, 0.7, 0.8, DARKWOOD));                // chest
+      pr.push(prop(0, 1.6, -hd + 0.45, b.w * 0.5, 0.1, 0.4, WOOD));                     // shelf
+      break;
+    }
+  }
+  b.lamp = { x: 0, y: lampY, z: Math.min(hd - 0.4, 0.8) };
+  return pr;
+}
+
 /* ------------------------------ POINTS OF INTEREST ------------------------------ */
 const POI = { hubs: [], camps: [], lairs: [], portals: [], ruins: [], all: [] };
 function buildPOI() {
@@ -181,15 +330,32 @@ function buildPOI() {
     const h = groundHRaw(z.hx, z.hz);
     const hub = { k: 'hub', n: z.hub, x: z.hx, y: h, z: z.hz, zone: z.id, r: 46, bld: [] };
     // procedural town layout: ring of buildings around a plaza
-    const nb = rng.ri(7, 11);
+    const nb = rng.ri(8, 11);
+    // every town gets an inn, a smithy, a shop and a shrine; the rest are homes
+    const kinds = ['inn', 'smith', 'shop', 'temple'];
+    while (kinds.length < nb) kinds.push('house');
     for (let i = 0; i < nb; i++) {
       const a = (i / nb) * TAU + rng.r(-.14, .14);
-      const rad = rng.r(24, 42);
-      hub.bld.push({
+      const rad = rng.r(26, 44);
+      const kind = kinds[i];
+      const big = kind === 'inn' || kind === 'temple';
+      const b = {
         x: z.hx + Math.cos(a) * rad, z: z.hz + Math.sin(a) * rad,
-        w: rng.r(5.5, 9.5), d: rng.r(5.5, 9.5), hgt: rng.r(4.5, 8.5), rot: a + PI / 2 + rng.r(-.3, .3),
-        roof: rng.chance(.75) ? 1 : 0, tint: rng.r(.75, 1.05),
-      });
+        w: rng.r(big ? 8 : 6.2, big ? 11 : 8.6), d: rng.r(big ? 8 : 6.2, big ? 11 : 8.6),
+        hgt: rng.r(4.6, big ? 7.4 : 6.0),
+        // the doorway is the building's local +Z face; orient it back toward the
+        // town square so every door is visible from the middle of town
+        rot: -a - PI / 2, roof: 1, tint: rng.r(.8, 1.05), kind,
+      };
+      b.n = kind === 'inn' ? rng.pick(INN_NAMES)
+        : kind === 'smith' ? rng.pick(SMITH_NAMES)
+          : kind === 'shop' ? z.hub.split(' ')[0] + ' ' + rng.pick(SHOP_NAMES)
+            : kind === 'temple' ? rng.pick(TEMPLE_NAMES)
+              : rng.pick(HOUSE_OWNERS) + "'s Cottage";
+      b.cr = Math.cos(b.rot); b.sr = Math.sin(b.rot);
+      b.rect = makeWallRects(b);
+      b.props = furnish(b, rng);
+      hub.bld.push(b);
     }
     POI.hubs.push(hub);
     addFlat(z.hx, z.hz, 66, h);
@@ -227,6 +393,18 @@ function buildPOI() {
       p.z = clamp(p.z, -WORLD_HALF + 30, WORLD_HALF - 30);
       p.y = groundHRaw(p.x, p.z);
     }
+  }
+  // Buildings sit on the town platform. Sample each floor height FIRST (with no
+  // pads active, so there is no circularity), then switch the pads on.
+  for (const hub of POI.hubs) {
+    for (const b of hub.bld) {
+      b.gy = groundH(b.x, b.z);
+      b.padR = Math.max(b.w, b.d) * 0.80 + 3.0;
+    }
+  }
+  for (const f of FLATS) {
+    const hub = POI.hubs.find(h => Math.abs(h.x - f.x) < 1 && Math.abs(h.z - f.z) < 1);
+    if (hub) f.bld = hub.bld;
   }
   // sync boss/raid coords back after relocation
   for (const l of POI.lairs) { const b = DB.bosses[l.boss]; b.x = l.x; b.z2 = l.z; b.y = l.y; }
@@ -331,18 +509,70 @@ function resolveProps(x, z, radius) {
   }
   _res[0] = ox; _res[1] = oz; return _res;
 }
-/** Town buildings are solid too. */
+/** Buildings collide wall by wall, so the doorway is a real opening. */
+const _bl = [0, 0], _bw = [0, 0];
 function resolveBuildings(x, z, radius) {
   let ox = x, oz = z;
   for (const hub of POI.hubs) {
-    if (V.dist2(x, z, hub.x, hub.z) > 90 * 90) continue;
+    if (V.dist2(ox, oz, hub.x, hub.z) > 110 * 110) continue;
     for (const b of hub.bld) {
-      const rr = radius + Math.max(b.w, b.d) * .52;
-      const dx = ox - b.x, dz = oz - b.z, d2 = dx * dx + dz * dz;
-      if (d2 < rr * rr && d2 > 1e-6) { const d = Math.sqrt(d2), push = rr - d; ox += dx / d * push; oz += dz / d * push; }
+      const reach = Math.hypot(b.w, b.d) * 0.5 + radius + 0.6;
+      if (V.dist2(ox, oz, b.x, b.z) > reach * reach) continue;
+      bldLocal(b, ox, oz, _bl);
+      let lx = _bl[0], lz = _bl[1], hit = false;
+      for (const r of b.rect) {
+        const px = clamp(lx, r.cx - r.hx, r.cx + r.hx);
+        const pz = clamp(lz, r.cz - r.hz, r.cz + r.hz);
+        const dx = lx - px, dz = lz - pz, d2 = dx * dx + dz * dz;
+        if (d2 > radius * radius) continue;
+        hit = true;
+        if (d2 > 1e-8) {
+          const d = Math.sqrt(d2), push = radius - d;
+          lx += dx / d * push; lz += dz / d * push;
+        } else {
+          // dead centre of a slab: eject through the nearest face
+          const l = lx - (r.cx - r.hx), rr = (r.cx + r.hx) - lx;
+          const u = lz - (r.cz - r.hz), dn = (r.cz + r.hz) - lz;
+          const m = Math.min(l, rr, u, dn);
+          if (m === l) lx = r.cx - r.hx - radius;
+          else if (m === rr) lx = r.cx + r.hx + radius;
+          else if (m === u) lz = r.cz - r.hz - radius;
+          else lz = r.cz + r.hz + radius;
+        }
+      }
+      if (hit) { bldWorld(b, lx, lz, _bw); ox = _bw[0]; oz = _bw[1]; }
     }
   }
   _res[0] = ox; _res[1] = oz; return _res;
+}
+/** Is this spot on a building's floor? Used to keep grass out of the rooms. */
+function insideBuildingXZ(x, z, pad) {
+  pad = pad || 0;
+  for (const hub of POI.hubs) {
+    if (V.dist2(x, z, hub.x, hub.z) > 110 * 110) continue;
+    for (const b of hub.bld) {
+      const reach = Math.hypot(b.w, b.d) * 0.5 + pad;
+      if (V.dist2(x, z, b.x, b.z) > reach * reach) continue;
+      bldLocal(b, x, z, _bl);
+      if (Math.abs(_bl[0]) < b.w / 2 + pad && Math.abs(_bl[1]) < b.d / 2 + pad) return true;
+    }
+  }
+  return false;
+}
+/** Which building, if any, is this point inside? */
+function buildingAt(x, y, z) {
+  for (const hub of POI.hubs) {
+    if (V.dist2(x, z, hub.x, hub.z) > 110 * 110) continue;
+    for (const b of hub.bld) {
+      const reach = Math.hypot(b.w, b.d) * 0.5;
+      if (V.dist2(x, z, b.x, b.z) > reach * reach) continue;
+      const gy = b.gy != null ? b.gy : groundH(b.x, b.z);
+      if (y < gy - 1.2 || y > gy + b.hgt + 0.4) continue;
+      bldLocal(b, x, z, _bl);
+      if (Math.abs(_bl[0]) < b.w / 2 - WALL_T - 0.05 && Math.abs(_bl[1]) < b.d / 2 - WALL_T - 0.05) return b;
+    }
+  }
+  return null;
 }
 
 /* ------------------------------ NAVIGATION ------------------------------ */

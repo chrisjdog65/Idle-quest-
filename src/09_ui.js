@@ -158,7 +158,17 @@ function updateHUD(dt) {
   $('pGuild').textContent = p.guild != null && GUILDS[p.guild] ? GUILDS[p.guild].n : '<no clan>';
   $('gold').innerHTML = fmt(p.gold) + ' <span style="opacity:.7">g</span>';
   $('sNum').textContent = SEASON.num;
-  $('sLeft').textContent = durShort(seasonLeft());
+  const fin = seasonFinalCall();
+  // What actually ends the season is the race to ASCEND_LEVEL, so show that
+  // once it is under way; the seven-day clock is only the outer backstop.
+  const seats = MYTHIC_HOLDERS.size;
+  $('sLeft').textContent = fin ? 'FINAL ' + durShort(seasonLeft())
+    : seats > 0 ? seats + '/' + MYTHIC_LIMIT + ' ★ · ' + durShort(seasonLeft())
+      : durShort(seasonLeft());
+  $('season').classList.toggle('final', fin);
+  $('season').title = fin
+    ? 'All Ascendant seats claimed — the season ends when this hits zero'
+    : 'Season ends 10 minutes after the third adventurer reaches level ' + ASCEND_LEVEL;
   const hh = Math.floor(G.tod * 24), mm = Math.floor((G.tod * 24 % 1) * 60);
   $('clock').textContent = pad2(hh) + ':' + pad2(mm);
 
@@ -199,6 +209,8 @@ function updateHUD(dt) {
   } else ip.classList.remove('on');
 
   if (uiDirty.tracker) { renderTracker(); uiDirty.tracker = 0; }
+  const soc = document.querySelector('#bar .mb[data-p="social"]');
+  if (soc) soc.classList.toggle('alert', PENDING.length > 0);
   updateActionBar();
   // auto-play status line
   $('autostate').innerHTML = p.autoOn ? AUTO.statusHTML() : '';
@@ -634,7 +646,7 @@ const PANEL_DEF = {
   guild: { t: 'Clan', tabs: ['My Clan', 'Clans', 'Wars'] },
   raid: { t: 'Raids & Bosses', tabs: ['Raids', 'World Bosses'] },
   hof: { t: 'Hall of Fame', tabs: ['Top 100', 'Top 20 Clans', 'Ascendants', 'Past Seasons'] },
-  social: { t: 'Adventurers', tabs: ['Online', 'Chat'] },
+  social: { t: 'Adventurers', tabs: ['Online', 'Whispers', 'Chat'] },
   opts: { t: 'Settings', tabs: ['Game', 'Graphics', 'Audio', 'About'] },
 };
 function panelOpen(which) {

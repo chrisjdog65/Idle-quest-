@@ -83,8 +83,14 @@ const PANEL_RENDER = {
     const rank = hof.findIndex(r => r.isPlayer) + 1;
     h += '<h4 class="sec">Standing</h4><div class="card center"><div style="font-size:26px;font-weight:900;color:var(--gold)">#' + rank + '</div>' +
       '<div class="tiny">of ' + (POP + 1) + ' adventurers this season</div></div>';
-    h += '<div class="hr"></div><div class="tiny center">Season ' + SEASON.num + ' ends in <b style="color:var(--gold)">' + dur(seasonLeft()) + '</b><br>' +
-      'Everyone resets to level 1. The Champion is crowned.</div>';
+    const seats = MYTHIC_LIMIT - MYTHIC_HOLDERS.size;
+    h += '<div class="hr"></div><div class="tiny center">' +
+      (seasonFinalCall()
+        ? '<b style="color:#ff6a80">FINAL ' + durShort(seasonLeft()) + '</b> — all Ascendant seats are gone.'
+        : 'The season ends <b style="color:var(--gold)">10 minutes</b> after the third adventurer reaches level ' +
+          ASCEND_LEVEL + '.<br><b style="color:var(--gold)">' + seats + ' of ' + MYTHIC_LIMIT +
+          '</b> Ascendant seats remain · outer limit ' + durShort(seasonLeft())) +
+      '<br>Then everyone resets to level 1 and two Champions are crowned: highest level, and greatest gear.</div>';
     return h;
   },
 
@@ -333,9 +339,20 @@ const PANEL_RENDER = {
       return h;
     }
     if (tab === 2) {
-      let h = '<div class="card center"><b style="color:#ff3f5f;font-size:16px">THE ASCENDANTS</b>' +
-        '<div class="tiny" style="margin-top:4px">Only <b>' + MYTHIC_LIMIT + '</b> adventurers in the entire world may ever bear Mythic gear in a season. ' +
-        (MYTHIC_LIMIT - MYTHIC_HOLDERS.size) + ' seat(s) remain.</div></div>';
+      const left = MYTHIC_LIMIT - MYTHIC_HOLDERS.size;
+      let h = '<div class="card center" style="border-color:#ff3f5f"><b style="color:#ff3f5f;font-size:16px">THE ASCENDANTS</b>' +
+        '<div class="tiny" style="margin-top:4px">The first <b>' + MYTHIC_LIMIT + '</b> adventurers to reach <b>level ' + ASCEND_LEVEL +
+        '</b> are handed a full set of <b class="q5">Mythic</b> gear. It cannot be found, bought or dropped — only raced for.</div>' +
+        '<div class="tiny" style="margin-top:5px">' + (left > 0
+          ? '<b style="color:var(--gold)">' + left + ' seat' + (left > 1 ? 's' : '') + ' still unclaimed — first to level ' + ASCEND_LEVEL + ' takes it.</b>'
+          : '<b style="color:#ff6a80">All seats claimed — the season ends in ' + durShort(seasonLeft()) + '.</b>') + '</div></div>';
+      if (SEASON.ascended.length) {
+        h += '<h4 class="sec">Order of Ascension</h4>';
+        for (const a of SEASON.ascended) {
+          h += '<div class="row"><span class="k">#' + a.place + ' to level ' + ASCEND_LEVEL + '</span><b class="q5">' +
+            esc(a.n) + (a.isPlayer ? ' (you)' : '') + '</b></div>';
+        }
+      }
       const holders = [];
       for (const id of MYTHIC_HOLDERS) {
         if (id === -1 && G.player) holders.push(playerAsRecord());
@@ -351,14 +368,41 @@ const PANEL_RENDER = {
       }
       return h;
     }
-    let h = '<div class="tiny">Every season ends with a Champion. Their name stays here forever.</div>';
-    if (!SEASON.champions.length) return h + '<div class="tiny center" style="padding:26px">No season has ended yet.<br>Season ' + SEASON.num + ' ends in <b style="color:var(--gold)">' + dur(seasonLeft()) + '</b>.</div>';
+    let h = '<div class="tiny">Every season ever played, kept forever — newest first.</div>';
+    if (!SEASON.champions.length) return h + '<div class="tiny center" style="padding:26px">No season has ended yet.<br>Season ' +
+      SEASON.num + ' ends in <b style="color:var(--gold)">' + dur(seasonLeft()) + '</b>.</div>';
+    const wins = { lv: 0, gs: 0, guild: 0 };
     for (const c of SEASON.champions) {
-      h += '<div class="card" style="margin-bottom:6px;border-color:var(--gold)"><div style="display:flex;gap:8px;align-items:center">' +
-        '<div style="font-size:24px">🏆</div><div style="flex:1"><b style="color:var(--gold)">Season ' + c.num + ' — ' + esc(c.champ.n) + '</b>' +
-        '<div class="tiny">Level ' + c.champ.lv + ' ' + CLASS_BY[c.champ.c].n + ' · ' + fmt(c.champ.gs) + ' gear · ' +
-        (c.champ.best >= 0 ? RARITY[c.champ.best].n : '—') + ' · ' + esc(c.champ.guild || 'no clan') + '</div>' +
-        '<div class="tiny">Top clan: ' + esc(c.guild ? c.guild.n : '—') + ' · you finished #' + c.playerRank + ' at level ' + c.playerLv + '</div></div></div></div>';
+      if (c.champ && c.champ.isPlayer) wins.lv++;
+      if ((c.gearChamp || c.champ || {}).isPlayer) wins.gs++;
+      if (c.guild && c.guild.isPlayerGuild) wins.guild++;
+    }
+    h += '<div class="grid g3" style="margin:6px 0">' +
+      '<div class="card center"><b>' + SEASON.champions.length + '</b><div class="tiny">seasons recorded</div></div>' +
+      '<div class="card center"><b>' + wins.lv + ' / ' + wins.gs + '</b><div class="tiny">your level / gear crowns</div></div>' +
+      '<div class="card center"><b>' + wins.guild + '</b><div class="tiny">your clan crowns</div></div></div>';
+    for (const c of SEASON.champions) {
+      const gc = c.gearChamp || c.champ;
+      h += '<div class="card" style="margin-bottom:6px;border-color:var(--gold)">' +
+        '<div style="display:flex;gap:8px;align-items:baseline"><b style="color:var(--gold);flex:1">🏆 Season ' + c.num + '</b>' +
+        '<span class="tiny">' + new Date(c.ended).toLocaleDateString() + '</span></div>';
+      if (c.sweep) {
+        h += '<div class="row"><span class="k">Champion — level &amp; gear</span><b>' + esc(c.champ.n) +
+          (c.champ.isPlayer ? ' (you)' : '') + ' · Lv ' + fmt(c.champ.lv) + '</b></div>';
+      } else {
+        h += '<div class="row"><span class="k">Champion of Levels</span><b>' + esc(c.champ.n) +
+          (c.champ.isPlayer ? ' (you)' : '') + ' · Lv ' + fmt(c.champ.lv) + '</b></div>' +
+          '<div class="row"><span class="k">Champion of Gear</span><b>' + esc(gc.n) +
+          (gc.isPlayer ? ' (you)' : '') + ' · ' + fmt(gc.gs) + '</b></div>';
+      }
+      h += '<div class="row"><span class="k">Crowned Clan</span><b>' + esc(c.guild ? c.guild.n : '—') +
+        (c.guild && c.guild.isPlayerGuild ? ' (yours)' : '') + (c.guild ? ' · ' + fmt(c.guild.respect) + ' respect' : '') + '</b></div>';
+      if (c.ascended && c.ascended.length) {
+        h += '<div class="row"><span class="k">Ascendants</span><b class="q5">' +
+          c.ascended.map(a => esc(a.n) + (a.isPlayer ? ' (you)' : '')).join(', ') + '</b></div>';
+      }
+      h += '<div class="row"><span class="k">You finished</span><b>#' + c.playerRank + ' by level' +
+        (c.playerGearRank ? ', #' + c.playerGearRank + ' by gear' : '') + ' · Lv ' + c.playerLv + '</b></div></div>';
     }
     return h;
   },
@@ -377,6 +421,25 @@ const PANEL_RENDER = {
           '<td class="tiny">' + esc(zn ? zn.n : '—') + '</td><td class="tiny">' + Math.round(d) + 'm</td></tr>';
       }
       return h + '</table>';
+    }
+    if (tab === 1) {
+      let h = '<div class="tiny">Adventurers whisper you asking for gold or gear. Answer them however you like — ' +
+        'they remember, and generous players get treated better when they ask for something back.</div>';
+      if (!PENDING.length) return h + '<div class="tiny center" style="padding:26px">No one is asking you for anything right now.</div>';
+      for (const req of PENDING) {
+        const rec = ROSTER[req.rid]; if (!rec) continue;
+        h += '<div class="card" style="margin-top:6px;border-color:rgba(240,166,60,.45)">' +
+          '<div style="display:flex;gap:8px;align-items:center"><div style="font-size:22px">' + CLASS_BY[rec.c].ic + '</div>' +
+          '<div style="flex:1;min-width:0"><b class="q' + Math.max(0, rec.best) + '">' + esc(rec.n) + '</b>' +
+          '<div class="tiny">Level ' + rec.lv + ' ' + CLASS_BY[rec.c].n + ' · ' +
+          (rec.g >= 0 && GUILDS[rec.g] ? esc(GUILDS[rec.g].n) : 'no clan') + '</div></div></div>' +
+          '<div class="tiny" style="margin-top:6px;color:#dfe6f2;font-style:italic">"' + esc(req.msg) + '"</div>' +
+          '<div style="display:flex;gap:5px;margin-top:7px">' +
+          '<div class="btn grn sm" data-act="grant" data-v="' + req.id + '">' +
+          (req.kind === 'gold' ? 'Send ' + fmt(req.amount) + 'g' : 'Send spare gear') + '</div>' +
+          '<div class="btn sm" data-act="deny" data-v="' + req.id + '">Decline</div></div></div>';
+      }
+      return h;
     }
     let h = '<div class="tiny">World, clan and trade chatter from the whole server.</div><div style="margin-top:6px">';
     for (let i = CHAT_LOG.length - 1; i >= 0; i--) {
@@ -491,6 +554,23 @@ function PANEL_ACT(a, v, node) {
     case 'rscale': SET.rscale = +v / 100; onResize(); renderPanel(); break;
     case 'save': saveGame(); toast('Saved.', 'sys'); break;
     case 'wipe': if (confirm('Delete your save and start a fresh season?')) { localStorage.removeItem(SAVE_KEY); location.reload(); } break;
+    case 'givegold': {
+      const [ri, raw] = v.split(':');
+      const rec = ROSTER[+ri]; if (!rec) break;
+      const amt = raw === 'pct' ? Math.floor(p.gold * .1) : +raw;
+      if (sendGold(rec, amt)) showAIInspect(rec);
+      break;
+    }
+    case 'giveitem': {
+      const [ri, bi] = v.split(':');
+      const rec = ROSTER[+ri]; if (!rec) break;
+      sendItem(rec, +bi); showAIInspect(rec);
+      break;
+    }
+    case 'askgold': { const rec = ROSTER[+v]; if (rec) { askForGold(rec); showAIInspect(rec); } break; }
+    case 'askitem': { const rec = ROSTER[+v]; if (rec) { askForItem(rec); showAIInspect(rec); } break; }
+    case 'grant': answerRequest(+v, true); renderPanel(); break;
+    case 'deny': answerRequest(+v, false); renderPanel(); break;
     case 'findplayer': { const r = ROSTER[+v]; if (r) { AUTO.setGoal(r.x, r.z, 'travel', r.n); toast('Marked ' + esc(r.n) + ' on your map', 'sys'); panelClose(); } break; }
     case 'perf': SET.perf = !SET.perf; renderPanel(); break;
     case 'mute': A.muted = !A.muted; audioSetVol(A.volMusic, A.volSfx); renderPanel(); break;
@@ -532,6 +612,30 @@ function showAIInspect(rec) {
     '<div class="row"><span class="k">Raids</span><b>' + fmt(rec.raids) + '</b></div>' +
     '<div class="row"><span class="k">Deaths</span><b>' + fmt(rec.deaths) + '</b></div>' +
     '<div class="row"><span class="k">Respect</span><b>' + fmt(Math.round(rec.respect)) + '</b></div>';
+  // ---- talk to them like a person ----
+  const rel = rec.rel || 0;
+  const mood = rel > 0.5 ? ['fond of you', '#4ad24a'] : rel > 0.12 ? ['warm', '#9ad2ff']
+    : rel < -0.4 ? ['sick of you', '#e0492f'] : rel < -0.1 ? ['wary', '#f0a63c'] : ['neutral', '#9aa3b4'];
+  h += '<h4 class="sec">Interact</h4>' +
+    '<div class="tiny">They are <b style="color:' + mood[1] + '">' + mood[0] + '</b> toward you' +
+    (rec.asked ? ' · you have asked them for something ' + rec.asked + '×' : '') + '.</div>';
+  const p = G.player;
+  const amts = [100, 1000, 10000].filter(a2 => p.gold >= a2);
+  h += '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:6px">' +
+    amts.map(a2 => '<div class="btn sm gold" data-act="givegold" data-v="' + rec.i + ':' + a2 + '">Send ' + fmt(a2) + 'g</div>').join('') +
+    (p.gold >= 20 ? '<div class="btn sm gold" data-act="givegold" data-v="' + rec.i + ':pct">Send 10% (' + fmt(Math.floor(p.gold * .1)) + 'g)</div>' : '') +
+    '</div>';
+  h += '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:5px">' +
+    '<div class="btn sm" data-act="askgold" data-v="' + rec.i + '">Ask for gold</div>' +
+    '<div class="btn sm" data-act="askitem" data-v="' + rec.i + '">Ask for an item</div></div>';
+  if (p.bags.length) {
+    h += '<h4 class="sec">Send an item</h4><div class="tiny">Tap to hand it over. If it beats what they are wearing, they will put it on.</div>';
+    p.bags.forEach((it, i) => {
+      h += '<div class="eqrow">' + cellHTML(it, 'bag', i) + '<div class="info"><div class="n q' + it.t + '">' + esc(it.n) + '</div>' +
+        '<div class="s">' + SLOT_BY[it.sl].n + ' · ilvl ' + it.il + ' · worth ' + fmt(it.val) + 'g</div></div>' +
+        '<div class="btn sm grn" data-act="giveitem" data-v="' + rec.i + ':' + i + '">Send</div></div>';
+    });
+  }
   if (g) h += '<h4 class="sec">Clan</h4><div class="card click" data-act="guildinfo" data-v="' + g.i + '"><b style="color:' + g.col + '">' + esc(g.n) + '</b><div class="tiny">"' + esc(g.motto) + '" · ' + g.members.length + ' members · ' + fmt(Math.round(g.respect)) + ' respect</div></div>';
   h += '<div class="btn wide" style="margin-top:10px" data-act="findplayer" data-v="' + rec.i + '">Show on map</div>';
   openModal(rec.n, h);
@@ -577,25 +681,56 @@ function openModal(title, html) {
 /* ------------------------------ SEASON END SCREEN ------------------------------ */
 function showSeasonEnd(rec) {
   const box = $('seasonend');
-  const c = rec.champ;
+  const crown = (title, c, sub) => c ? (
+    '<div class="champ"><div class="tiny" style="letter-spacing:.3em;color:var(--gold)">' + title + '</div>' +
+    '<div class="cn">' + esc(c.n) + (c.isPlayer ? ' <span style="font-size:.5em;color:#4ad24a">(YOU)</span>' : '') + '</div>' +
+    '<div class="tiny" style="color:#c9bda0;margin-top:4px">Level ' + fmt(c.lv) + ' ' + CLASS_BY[c.c].n +
+    ' \u00b7 ' + fmt(c.gs) + ' gear score</div>' +
+    '<div class="tiny" style="color:#c9bda0">Best gear: <b class="q' + Math.max(0, c.best) + '">' +
+    (c.best >= 0 ? RARITY[c.best].n : '\u2014') + '</b>' + (c.guild ? ' \u00b7 ' + esc(c.guild) : '') + '</div>' +
+    (sub ? '<div class="tiny" style="color:#8f98a9;margin-top:5px">' + sub + '</div>' : '') + '</div>') : '';
+
   let h = '<h2>SEASON ' + rec.num + ' COMPLETE</h2>' +
-    '<div class="tiny" style="letter-spacing:.24em;text-transform:uppercase;color:#9aa3b4">The world resets. A champion is crowned.</div>';
-  h += '<div class="champ"><div class="tiny" style="letter-spacing:.3em;color:var(--gold)">IDLE QUEST CHAMPION</div>' +
-    '<div class="cn">' + esc(c.n) + '</div>' +
-    '<div class="tiny" style="color:#c9bda0;margin-top:4px">Level ' + fmt(c.lv) + ' ' + CLASS_BY[c.c].n + ' · ' + fmt(c.gs) + ' gear score</div>' +
-    '<div class="tiny" style="color:#c9bda0">Best gear: <b class="q' + Math.max(0, c.best) + '">' + (c.best >= 0 ? RARITY[c.best].n : '—') + '</b>' +
-    (c.guild ? ' · ' + esc(c.guild) : '') + '</div>' +
-    (c.isPlayer ? '<div style="margin-top:8px;color:#4ad24a;font-weight:800;letter-spacing:.1em">THAT IS YOU.</div>' : '') +
-    '</div>';
-  if (rec.guild) h += '<div class="card" style="max-width:420px;margin:0 auto"><b style="color:var(--gold)">Champion Clan</b>' +
-    '<div style="font-size:17px;font-weight:800;margin-top:2px">' + esc(rec.guild.n) + '</div>' +
-    '<div class="tiny">' + fmt(rec.guild.respect) + ' respect</div></div>';
+    '<div class="tiny" style="letter-spacing:.24em;text-transform:uppercase;color:#9aa3b4">' +
+    (rec.ascended && rec.ascended.length >= MYTHIC_LIMIT
+      ? 'All ' + MYTHIC_LIMIT + ' Ascendant seats were claimed \u00b7 the final ten minutes are over'
+      : 'The world resets \u00b7 champions are crowned') + '</div>';
+
+  if (rec.sweep) {
+    h += crown('IDLE QUEST CHAMPION \u2014 LEVEL &amp; GEAR', rec.champ,
+      'Took both crowns. Nobody else came close in either.');
+  } else {
+    h += crown('CHAMPION OF LEVELS', rec.champ, 'Highest level in the world');
+    h += crown('CHAMPION OF GEAR', rec.gearChamp, 'Greatest gear power in the world');
+  }
+
+  if (rec.guild) {
+    h += '<div class="champ" style="border-color:#4aa3f0;box-shadow:0 0 40px rgba(74,163,240,.2)">' +
+      '<div class="tiny" style="letter-spacing:.3em;color:#8fc6ff">CROWNED CLAN \u2014 HIGHEST RESPECT</div>' +
+      '<div class="cn">' + esc(rec.guild.n) + (rec.guild.isPlayerGuild ? ' <span style="font-size:.5em;color:#4ad24a">(YOURS)</span>' : '') + '</div>' +
+      '<div class="tiny" style="color:#c9bda0;margin-top:4px">' + fmt(rec.guild.respect) + ' respect \u00b7 ' +
+      rec.guild.members + ' members \u00b7 ' + rec.guild.wins + ' clan wars won</div></div>';
+  }
+
+  if (rec.ascended && rec.ascended.length) {
+    h += '<div style="max-width:460px;margin:12px auto"><h4 class="sec">The Ascendants</h4>' +
+      rec.ascended.map(a => '<div class="row"><span class="k">#' + a.place + ' to level ' + ASCEND_LEVEL + '</span>' +
+        '<b class="q5">' + esc(a.n) + (a.isPlayer ? ' (you)' : '') + '</b></div>').join('') + '</div>';
+  }
+
   h += '<div class="card" style="max-width:420px;margin:12px auto"><b style="color:var(--gold)">Your Season</b>' +
-    '<div style="font-size:22px;font-weight:900">#' + rec.playerRank + '</div>' +
-    '<div class="tiny">finished at level ' + rec.playerLv + ' of ' + (POP + 1) + ' adventurers</div></div>';
-  h += '<div style="max-width:420px;margin:0 auto"><h4 class="sec">Final Top 10</h4>' +
-    rec.top.map((r, i) => '<div class="row"><span class="k">' + (i + 1) + '. ' + esc(r.n) + (r.isPlayer ? ' (you)' : '') + '</span><b>Lv ' + r.lv + ' · ' + fmt(r.gs) + '</b></div>').join('') + '</div>';
-  h += '<button class="bigbtn" style="margin-top:20px" id="newseason">Begin Season ' + (rec.num + 1) + '</button>';
+    '<div style="display:flex;gap:14px;justify-content:center;margin-top:4px">' +
+    '<div><div style="font-size:22px;font-weight:900">#' + rec.playerRank + '</div><div class="tiny">by level (' + rec.playerLv + ')</div></div>' +
+    '<div><div style="font-size:22px;font-weight:900">#' + (rec.playerGearRank || '\u2014') + '</div><div class="tiny">by gear</div></div>' +
+    '</div><div class="tiny" style="margin-top:4px">of ' + (POP + 1) + ' adventurers</div></div>';
+
+  h += '<div style="max-width:420px;margin:0 auto"><h4 class="sec">Final Top 10 by Level</h4>' +
+    rec.top.map((r, i) => '<div class="row"><span class="k">' + (i + 1) + '. ' + esc(r.n) + (r.isPlayer ? ' (you)' : '') +
+      '</span><b>Lv ' + fmt(r.lv) + ' \u00b7 ' + fmt(r.gs) + '</b></div>').join('') + '</div>';
+
+  h += '<button class="bigbtn" style="margin-top:20px" id="newseason">Begin Season ' + (rec.num + 1) + '</button>' +
+    '<div class="tiny" style="margin-top:8px;color:#8f98a9">Season ' + rec.num +
+    ' is now permanently recorded in the Hall of Fame</div>';
   box.innerHTML = h;
   box.classList.add('on');
   $('newseason').onclick = () => { box.classList.remove('on'); startNewSeason(); sfx('levelup', 1); };

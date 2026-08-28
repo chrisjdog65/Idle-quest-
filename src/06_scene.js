@@ -192,11 +192,17 @@ function grassForCell(cx, cz) {
   const data = new Float32Array(want * 8);
   let n = 0;
   const bc = zn ? zn.col : [.4, .6, .3];
+  // only worth testing buildings when this cell is actually near a town
+  let nearTown = false;
+  for (const hub of POI.hubs) {
+    if (V.dist2(ox + GCELL / 2, oz + GCELL / 2, hub.x, hub.z) < 110 * 110) { nearTown = true; break; }
+  }
   for (let i = 0; i < want; i++) {
     const x = ox + rng.f() * GCELL, z = oz + rng.f() * GCELL;
     const h = groundH(x, z);
     if (h < WATER_Y + .4 || h > 108) continue;
     if (slopeAt(x, z) > .40) continue;
+    if (nearTown && insideBuildingXZ(x, z, 0.2)) continue;      // no lawns indoors
     const o = n * 8;
     data[o] = x; data[o + 1] = h - .04; data[o + 2] = z;
     data[o + 3] = rng.r(.085, .155);                // half-width; height = 3.4x
@@ -614,75 +620,125 @@ function drawProps(px, pz, viewDist) {
     }
   }
 }
+const _bp = [0, 0];
+/** One hollow building: floor, four walls with a doorway, ceiling, roof, sign
+    and — when you are close enough to care — the furniture inside. */
+function drawBuilding(b, px, pz, night) {
+  const gy = b.gy != null ? b.gy : groundH(b.x, b.z);
+  if (!sphereInFrustum(b.x, gy + b.hgt * .6, b.z, Math.hypot(b.w, b.d) * .7 + b.hgt)) return;
+  const d2 = V.dist2(px, pz, b.x, b.z);
+  const close = d2 < 90 * 90;
+  const inside = G.indoorB === b;
+  const t = b.tint;
+  const lit = inside ? 0.20 : night * 0.06;          // interiors read without a real light
+  const wallC = [.60 * t, .53 * t, .44 * t];
+  const trimC = [.26 * t, .17 * t, .12 * t];
+
+  // floor — lifted a few centimetres so it does not z-fight the town platform
+  M4.trs(_m, b.x, gy - 0.10, b.z, 0, b.rot, 0, b.w, 0.34, b.d);
+  pushInst(M.box, _m, .30 * t, .24 * t, .19 * t, lit, 0, .95);
+
+  // four walls, the front one split around the doorway
+  for (const r of b.rect) {
+    bldWorld(b, r.cx, r.cz, _bp);
+    M4.trs(_m, _bp[0], gy + 0.2 + b.hgt * .5, _bp[1], 0, b.rot, 0, r.hx * 2, b.hgt, r.hz * 2);
+    pushInst(M.box, _m, wallC[0], wallC[1], wallC[2], lit, 0, .93);
+  }
+  // lintel over the door
+  {
+    const hd = b.d / 2;
+    bldWorld(b, 0, hd, _bp);
+    M4.trs(_m, _bp[0], gy + 0.2 + b.hgt - (b.hgt - 2.5) * .5, _bp[1], 0, b.rot, 0, DOOR_W + .3, Math.max(.4, b.hgt - 2.5), WALL_T * 2);
+    pushInst(M.box, _m, wallC[0], wallC[1], wallC[2], lit, 0, .93);
+    // door frame posts
+    for (const sx of [-1, 1]) {
+      bldWorld(b, sx * (DOOR_W / 2 + .12), hd, _bp);
+      M4.trs(_m, _bp[0], gy + 1.45, _bp[1], 0, b.rot, 0, .26, 2.6, WALL_T * 2.2);
+      pushInst(M.box, _m, trimC[0], trimC[1], trimC[2], lit, 0, .9);
+    }
+  }
+  // Timber banding hugs the OUTSIDE of the four walls. It used to be one box
+  // spanning the whole footprint, which put a solid slab across the room at
+  // chest height and hid the furniture and the player underneath it.
+  const hwB = b.w / 2, hdB = b.d / 2;
+  for (const fy of [0.34, 0.74]) {
+    const by = gy + 0.2 + b.hgt * fy;
+    for (const sz of [-1, 1]) {
+      bldWorld(b, 0, sz * hdB, _bp);
+      M4.trs(_m, _bp[0], by, _bp[1], 0, b.rot, 0, b.w * 1.02, .2, .14);
+      pushInst(M.box, _m, trimC[0], trimC[1], trimC[2], night * .04, 0, .95);
+    }
+    for (const sx of [-1, 1]) {
+      bldWorld(b, sx * hwB, 0, _bp);
+      M4.trs(_m, _bp[0], by, _bp[1], 0, b.rot, 0, .14, .2, b.d * 1.02);
+      pushInst(M.box, _m, trimC[0], trimC[1], trimC[2], night * .04, 0, .95);
+    }
+  }
+  if (close) for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    bldWorld(b, sx * b.w / 2, sz * b.d / 2, _bp);
+    M4.trs(_m, _bp[0], gy + 0.2 + b.hgt * .5, _bp[1], 0, b.rot, 0, .3, b.hgt, .3);
+    pushInst(M.box, _m, trimC[0], trimC[1], trimC[2], 0, 0, .95);
+  }
+  // windows — warm and lit after dusk
+  const wlit = night > .12 ? night * 3.0 : 0;
+  const wc = wlit > 0 ? [1.0, .78, .38] : [.16, .19, .24];
+  for (const sx of [-1, 1]) {
+    bldWorld(b, sx * (b.w / 2 + .02), 0, _bp);
+    M4.trs(_m, _bp[0], gy + 0.2 + b.hgt * .58, _bp[1], 0, b.rot, 0, .16, .9, b.d * .34);
+    pushInst(M.box, _m, wc[0], wc[1], wc[2], wlit, 0, .35);
+  }
+  // ceiling keeps the interior feeling like a room, then the roof on top
+  M4.trs(_m, b.x, gy + 0.2 + b.hgt + .1, b.z, 0, b.rot, 0, b.w * 1.01, .22, b.d * 1.01);
+  pushInst(M.box, _m, .24 * t, .19 * t, .15 * t, lit * .8, 0, .95);
+  M4.trs(_m, b.x, gy + 0.2 + b.hgt + .2, b.z, 0, b.rot, 0, b.w * 1.3, b.hgt * .5, b.d * 1.3);
+  pushInst(M.pyr, _m, .40 * t, .19 * t, .15 * t, 0, 0, .92);
+
+  // hanging sign by the door
+  if (close && b.kind !== 'house') {
+    bldWorld(b, DOOR_W / 2 + 1.0, b.d / 2 + .35, _bp);
+    M4.trs(_m, _bp[0], gy + 2.9, _bp[1], 0, b.rot, 0, 1.5, .85, .12);
+    pushInst(M.box, _m, .30, .22, .14, night * .5, 0, .8);
+  }
+
+  // ---- interior: furniture, hearth, lantern ----
+  if (!close) return;
+  for (const pr of b.props) {
+    bldWorld(b, pr.x, pr.z, _bp);
+    M4.trs(_m, _bp[0], gy + pr.y, _bp[1], 0, b.rot + pr.r, 0, pr.sx, pr.sy, pr.sz);
+    const mesh = pr.m === 'sph' ? M.sph : pr.m === 'cyl' ? M.cyl : M.box;
+    pushInst(mesh, _m, pr.c[0], pr.c[1], pr.c[2], pr.e + (pr.e ? 0 : lit), 0, .9);
+  }
+  // lantern
+  if (b.lamp) {
+    bldWorld(b, b.lamp.x, b.lamp.z, _bp);
+    M4.trs(_m, _bp[0], gy + b.lamp.y, _bp[1], 0, b.rot, 0, .34, .34, .34);
+    pushInst(M.sph, _m, 1.0, .86, .52, 2.0, 0, .2);
+  }
+  // hearth embers
+  if (b.fire && (R.frame % 4 === 0) && d2 < 60 * 60) {
+    bldWorld(b, b.fire.x, b.fire.z, _bp);
+    const cold = b.fire.cold;
+    spawnPart(_bp[0] + (Math.random() - .5) * .35, gy + b.fire.y + .3, _bp[1] + (Math.random() - .5) * .35,
+      0, .8 + Math.random() * .7, 0, 1.0, .18,
+      cold ? .7 : 1, cold ? .85 : .55, cold ? 1 : .2, .9, 0, cold ? .1 : .5, 0);
+  }
+}
+
 function drawTowns(px, pz, viewDist) {
+  const night = R.sky ? R.sky.night : 0;
   for (const hub of POI.hubs) {
     const hd = V.dist2(px, pz, hub.x, hub.z);
     if (hd > (viewDist + 70) * (viewDist + 70)) continue;
-    const close = hd < 150 * 150;
-    for (const b of hub.bld) {
-      const gy = groundH(b.x, b.z);
-      if (!sphereInFrustum(b.x, gy + b.hgt * .5, b.z, Math.max(b.w, b.d) + b.hgt)) continue;
-      const t = b.tint;
-      // stone plinth
-      M4.trs(_m, b.x, gy + .35, b.z, 0, b.rot, 0, b.w * 1.10, .7, b.d * 1.10);
-      pushInst(M.box, _m, .38 * t, .36 * t, .33 * t, 0, 0, .96);
-      // plastered walls — a hint of lamplight bounce keeps towns readable at night
-      const glowN = R.sky ? R.sky.night * 0.07 : 0;
-      M4.trs(_m, b.x, gy + .6 + b.hgt * .5, b.z, 0, b.rot, 0, b.w, b.hgt, b.d);
-      pushInst(M.box, _m, .60 * t, .53 * t, .44 * t, glowN, 0, .93);
-      // exposed timber frame: two horizontal bands
-      for (const fy of [0.34, 0.74]) {
-        M4.trs(_m, b.x, gy + .6 + b.hgt * fy, b.z, 0, b.rot, 0, b.w * 1.02, .22, b.d * 1.02);
-        pushInst(M.box, _m, .26 * t, .17 * t, .12 * t, 0, 0, .95);
-      }
-      // corner posts
-      if (close) for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-        const cx2 = Math.cos(b.rot), sz2 = Math.sin(b.rot);
-        const lx = sx * b.w * .48, lz = sz * b.d * .48;
-        M4.trs(_m, b.x + lx * cx2 - lz * sz2, gy + .6 + b.hgt * .5, b.z + lx * sz2 + lz * cx2,
-          0, b.rot, 0, .26, b.hgt, .26);
-        pushInst(M.box, _m, .24 * t, .16 * t, .11 * t, 0, 0, .95);
-      }
-      // door on the front face
-      {
-        const cx2 = Math.cos(b.rot), sz2 = Math.sin(b.rot);
-        const lz = b.d * .52;
-        M4.trs(_m, b.x - lz * sz2, gy + .6 + 1.05, b.z + lz * cx2, 0, b.rot, 0, 1.25, 2.1, .16);
-        pushInst(M.box, _m, .21 * t, .13 * t, .09 * t, 0, 0, .9);
-      }
-      // windows — warm and lit after dusk
-      const night = R.sky.night;
-      const wlit = night > .12 ? night * 3.0 : 0;
-      const wc = wlit > 0 ? [1.0, .78, .38] : [.16, .19, .24];
-      for (const sgn of [-1, 1]) {
-        const cx2 = Math.cos(b.rot), sz2 = Math.sin(b.rot);
-        const lx = sgn * b.w * .52;
-        M4.trs(_m, b.x + lx * cx2, gy + .6 + b.hgt * .58, b.z + lx * sz2, 0, b.rot, 0, .16, .9, b.d * .34);
-        pushInst(M.box, _m, wc[0], wc[1], wc[2], wlit, 0, .35);
-      }
-      // roof
-      if (b.roof) {
-        M4.trs(_m, b.x, gy + .6 + b.hgt, b.z, 0, b.rot, 0, b.w * 1.28, b.hgt * .55, b.d * 1.28);
-        pushInst(M.pyr, _m, .40 * t, .19 * t, .15 * t, 0, 0, .92);
-      } else {
-        M4.trs(_m, b.x, gy + .6 + b.hgt + .16, b.z, 0, b.rot, 0, b.w * 1.16, .32, b.d * 1.16);
-        pushInst(M.box, _m, .34 * t, .30 * t, .26 * t, 0, 0, .94);
-      }
-      // chimney
-      if (close && b.roof) {
-        M4.trs(_m, b.x + b.w * .22, gy + .6 + b.hgt + b.hgt * .45, b.z + b.d * .2, 0, b.rot, 0, .5, 1.5, .5);
-        pushInst(M.box, _m, .32 * t, .27 * t, .24 * t, 0, 0, .96);
-      }
-    }
+    for (const b of hub.bld) drawBuilding(b, px, pz, night);
     // town banner
     const gy = groundH(hub.x, hub.z);
     M4.trs(_m, hub.x, gy + 3.6, hub.z, 0, 0, 0, .24, 7.2, .24);
     pushInst(M.box, _m, .22, .18, .14, 0, 0, .9);
     M4.trs(_m, hub.x + 1.0, gy + 5.6, hub.z, 0, 0, 0, 1.9, 1.7, .07);
     pushInst(M.box, _m, .74, .16, .16, .10, .05, .7);
-    // a warm brazier so towns read at night
+    // braziers so towns read at night
     for (let i = 0; i < 3; i++) {
-      const a = i / 3 * TAU + .5, r = 11;
+      const a = i / 3 * TAU + .5, r = 13;
       const bx = hub.x + Math.cos(a) * r, bz = hub.z + Math.sin(a) * r;
       const by = groundH(bx, bz);
       M4.trs(_m, bx, by + .8, bz, 0, 0, 0, .5, 1.6, .5);
@@ -696,6 +752,7 @@ function drawTowns(px, pz, viewDist) {
     }
   }
 }
+
 function drawPOIMarkers(px, pz, viewDist) {
   // boss lairs get a ring of standing stones, raid portals a glowing arch
   for (const l of POI.lairs) {

@@ -16,7 +16,7 @@ function packRoster() {
       r.gt.join(','), r.gi.join(','), r.g, r.st, +r.skill.toFixed(3),
       Math.round(r.x), Math.round(r.z), Math.round(r.respect), Math.round(r.kills),
       Math.round(r.quests), Math.round(r.bosses), Math.round(r.raids), r.deaths, r.best,
-      r.title, r.sk, r.hr, r.z2, r.pvp]);
+      r.title, r.sk, r.hr, r.z2, r.pvp, +(r.gen || .5).toFixed(3), +(r.rel || 0).toFixed(3)]);
   }
   return out;
 }
@@ -31,6 +31,7 @@ function unpackRoster(arr) {
       x: a[11], z: a[12], tx: a[11], tz: a[12],
       respect: a[13], kills: a[14], quests: a[15], bosses: a[16], raids: a[17],
       deaths: a[18], best: a[19], title: a[20], sk: a[21], hr: a[22], z2: a[23], pvp: a[24] || 0,
+      gen: a[25] == null ? .5 : a[25], rel: a[26] || 0, asked: 0,
       av: null, online: 1, hof: 0, mythicAt: 0,
     });
   }
@@ -50,7 +51,8 @@ function saveGame() {
   try {
     const data = {
       v: 1, ts: Date.now(),
-      season: { num: SEASON.num, start: SEASON.start, ended: SEASON.ended, champions: SEASON.champions },
+      season: { num: SEASON.num, start: SEASON.start, ended: SEASON.ended, champions: SEASON.champions,
+        milestone: SEASON.milestone, ascended: SEASON.ascended },
       mythic: Array.from(MYTHIC_HOLDERS),
       set: SET,
       p: {
@@ -78,6 +80,7 @@ function loadGame() {
 function applySave(d) {
   SEASON.num = d.season.num; SEASON.start = d.season.start;
   SEASON.ended = !!d.season.ended; SEASON.champions = d.season.champions || [];
+  SEASON.milestone = d.season.milestone || 0; SEASON.ascended = d.season.ascended || [];
   MYTHIC_HOLDERS.clear(); (d.mythic || []).forEach(x => MYTHIC_HOLDERS.add(x));
   Object.assign(SET, d.set || {});
   R.quality = SET.quality;
@@ -121,17 +124,19 @@ function playerOffline(ms) {
   for (let i = 0; i < n; i++) {
     const gearFit = clamp(p.st.gs / Math.max(1, refPrimary(p.level) * 5.2), 0.25, 1.3);
     const eff = EFF * (0.7 + gearFit * 0.5);
+    const lvBefore = p.level;
     let lp = levelRate(p.level, eff) * realStep;
     while (lp >= 1) { p.level++; lp -= 1; }
     p.xp += lp * xpNeed(p.level);
     while (p.xp >= xpNeed(p.level)) { p.xp -= xpNeed(p.level); p.level++; }
+    if (lvBefore < ASCEND_LEVEL && p.level >= ASCEND_LEVEL) tryAscend(p);
     p.gold += (3.2 + p.level * 1.4) * realStep * 0.34 * EFF;
     p.kills += realStep * 0.30 * EFF;
     // loot rolls
     if (rng.f() < 0.055 * realStep * EFF) {
       const q = rng.chance(.2) ? 3 : 1;
       let tier = rollTier(rng, q, 0);
-      if (tier === 5 && (p.level < MYTHIC_MIN_LEVEL || q < MYTHIC_MIN_SOURCE || !metaCanMythic(p))) tier = 4;
+      if (tier >= 5) tier = 4;                 // Mythic is awarded, never dropped
       const ilvl = Math.max(1, Math.round(p.level * 2.45 + rng.r(-6, 10) + tier * 3));
       const it = genItem(rng, ilvl, tier, rng.pick(SLOT_KEYS), p.cls);
       const cur = p.gear[it.sl === 'ring2' ? 'ring1' : it.sl];
