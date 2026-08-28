@@ -6243,8 +6243,10 @@ function setupInput() {
     // joystick is camera-relative
     const ax = dx / (d || 1) * m, az = dy / (d || 1) * m;
     const cy = G.camYaw;
+    // Camera-relative basis. Right must match the view matrix, whose x axis is
+    // cross(up, eye-target) = (-cos yaw, sin yaw) — not its negation.
     const fx = Math.sin(cy), fz = Math.cos(cy);
-    const rx = Math.cos(cy), rz = -Math.sin(cy);
+    const rx = -Math.cos(cy), rz = Math.sin(cy);
     INPUT.mx = fx * (-az) + rx * ax;
     INPUT.mz = fz * (-az) + rz * ax;
     INPUT.sprint = m > 0.92;
@@ -7791,8 +7793,9 @@ function loop(ts) {
     if (keys.KeyD || keys.ArrowRight) kx += 1;
     if (kx || kz) {
       const cy = G.camYaw;
-      INPUT.mx = Math.sin(cy) * kz + Math.cos(cy) * kx;
-      INPUT.mz = Math.cos(cy) * kz - Math.sin(cy) * kx;
+      // same basis as the touch stick: forward (sin,cos), right (-cos,sin)
+      INPUT.mx = Math.sin(cy) * kz - Math.cos(cy) * kx;
+      INPUT.mz = Math.cos(cy) * kz + Math.sin(cy) * kx;
       INPUT.sprint = !!keys.ShiftLeft || INPUT.sprintToggle;
     } else if (INPUT.stickId < 0) { INPUT.mx = 0; INPUT.mz = 0; }
     if (INPUT.sprintToggle) INPUT.sprint = true;

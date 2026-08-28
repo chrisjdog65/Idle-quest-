@@ -498,8 +498,10 @@ function setupInput() {
     // joystick is camera-relative
     const ax = dx / (d || 1) * m, az = dy / (d || 1) * m;
     const cy = G.camYaw;
+    // Camera-relative basis. Right must match the view matrix, whose x axis is
+    // cross(up, eye-target) = (-cos yaw, sin yaw) — not its negation.
     const fx = Math.sin(cy), fz = Math.cos(cy);
-    const rx = Math.cos(cy), rz = -Math.sin(cy);
+    const rx = -Math.cos(cy), rz = Math.sin(cy);
     INPUT.mx = fx * (-az) + rx * ax;
     INPUT.mz = fz * (-az) + rz * ax;
     INPUT.sprint = m > 0.92;

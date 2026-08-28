@@ -374,8 +374,9 @@ function loop(ts) {
     if (keys.KeyD || keys.ArrowRight) kx += 1;
     if (kx || kz) {
       const cy = G.camYaw;
-      INPUT.mx = Math.sin(cy) * kz + Math.cos(cy) * kx;
-      INPUT.mz = Math.cos(cy) * kz - Math.sin(cy) * kx;
+      // same basis as the touch stick: forward (sin,cos), right (-cos,sin)
+      INPUT.mx = Math.sin(cy) * kz - Math.cos(cy) * kx;
+      INPUT.mz = Math.cos(cy) * kz + Math.sin(cy) * kx;
       INPUT.sprint = !!keys.ShiftLeft || INPUT.sprintToggle;
     } else if (INPUT.stickId < 0) { INPUT.mx = 0; INPUT.mz = 0; }
     if (INPUT.sprintToggle) INPUT.sprint = true;
