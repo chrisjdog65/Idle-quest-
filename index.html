@@ -6620,10 +6620,16 @@ function drawOverlay() {
   g.lineJoin = 'round';
 
   // ---- nameplates ----
+  // Walls hide people. Near a town, a plate only draws when you and the owner
+  // are in the same room (or both outdoors); otherwise names float through the
+  // timber as though the building were not there.
+  let hubNear = false;
+  for (const hub of POI.hubs) { if (V.dist2(p.x, p.z, hub.x, hub.z) < 130 * 130) { hubNear = true; break; } }
   const plates = [];
   for (const e of G.ents) {
     const d = V.dist(e.x, e.z, p.x, p.z);
     if (d > 78 || e.dead) continue;
+    if (hubNear && buildingAt(e.x, e.y + 0.9, e.z) !== G.indoorB) continue;
     plates.push({ e, d });
   }
   plates.sort((a, b) => b.d - a.d);
@@ -6690,6 +6696,7 @@ function drawOverlay() {
   // ---- floating combat text ----
   for (const d of G.dmg) {
     const t = d.t / 1.5;
+    if (hubNear && buildingAt(d.x, d.y + 0.9, d.z) !== G.indoorB) continue;   // same wall rule as the plates
     if (!worldToScreen(d.x + d.ox, d.y + t * 2.4, d.z, _sp)) continue;
     const a = t < .75 ? 1 : (1 - t) * 4;
     g.globalAlpha = clamp(a, 0, 1);
