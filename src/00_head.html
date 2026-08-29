@@ -28,8 +28,8 @@ canvas{display:block;touch-action:none}
   --sal:env(safe-area-inset-left,0px); --sar:env(safe-area-inset-right,0px);
   --ui:1;
 }
-.q0{color:#9d9d9d}.q1{color:#4ad24a}.q2{color:#3f8fe0}.q3{color:#b45ef0}.q4{color:#ff9a1f}.q5{color:#ff3f5f}
-.bg0{background:#6e6e6e}.bg1{background:#2f9b3a}.bg2{background:#2f6fd0}.bg3{background:#8a35c8}.bg4{background:#d97a12}.bg5{background:#c81f3d}
+.q0{color:#9d9d9d}.q1{color:#4ad24a}.q2{color:#3f8fe0}.q3{color:#b45ef0}.q4{color:#ff9a1f}.q5{color:#ff3f5f}.q6{color:#7ff2ff}
+.bg0{background:#6e6e6e}.bg1{background:#2f9b3a}.bg2{background:#2f6fd0}.bg3{background:#8a35c8}.bg4{background:#d97a12}.bg5{background:#c81f3d}.bg6{background:#2aa8bd}
 /* ============================== LAYERS ============================== */
 #gl{position:absolute;inset:0;width:100%;height:100%;z-index:1}
 #fx{position:absolute;inset:0;width:100%;height:100%;z-index:2;pointer-events:none}
@@ -105,6 +105,15 @@ canvas{display:block;touch-action:none}
 #season b{color:var(--gold)}
 #season.final{border-color:#ff3f5f;color:#ffb9c4;animation:finalPulse 1.4s ease-in-out infinite}
 #season.final b{color:#ff6a80}
+#season.ovarm{border-color:#a02bd8;color:#e2b9ff;animation:ovPulse 2.2s ease-in-out infinite}
+#season.ovarm b{color:#c77dff}
+@keyframes ovPulse{0%,100%{box-shadow:0 0 0 0 rgba(160,43,216,.0)}50%{box-shadow:0 0 18px 2px rgba(160,43,216,.55)}}
+#ovbar{position:fixed;top:calc(env(safe-area-inset-top,0px) + 8px);left:50%;transform:translateX(-50%);z-index:9;display:none;text-align:center;pointer-events:none}
+#ovbar.on{display:block}
+#ovLabel{font:700 10px/1 Trebuchet MS,sans-serif;letter-spacing:.24em;color:#c9a6e8;text-shadow:0 1px 3px #000}
+#ovCount{font:900 34px/1.05 Trebuchet MS,sans-serif;font-variant-numeric:tabular-nums;color:#f2e6ff;text-shadow:0 2px 10px #000,0 0 22px rgba(160,43,216,.7)}
+#ovDelta{font:900 15px/1 Trebuchet MS,sans-serif;color:#ff5a72;text-shadow:0 1px 4px #000;opacity:0;transition:opacity .25s}
+#ovDelta.on{opacity:1}
 @keyframes finalPulse{0%,100%{box-shadow:0 0 0 0 rgba(255,63,95,.55)}50%{box-shadow:0 0 0 7px rgba(255,63,95,0)}}
 #gold{font-size:12px;color:var(--gold);background:rgba(8,12,20,.8);border:1px solid var(--edge2);border-radius:8px;padding:3px 8px;font-weight:800}
 /* ============================== QUEST TRACKER ============================== */
@@ -226,6 +235,8 @@ h4.sec:first-child{margin-top:2px}
 .cell.r3{border-color:#8a35c8;box-shadow:inset 0 0 14px rgba(138,53,200,.26)}
 .cell.r4{border-color:#d97a12;box-shadow:inset 0 0 16px rgba(217,122,18,.3),0 0 8px rgba(217,122,18,.22)}
 .cell.r5{border-color:#ff3f5f;box-shadow:inset 0 0 18px rgba(255,63,95,.34),0 0 14px rgba(255,63,95,.34);animation:mythGlow 2.2s ease-in-out infinite}
+.cell.r6{border-color:#7ff2ff;box-shadow:inset 0 0 22px rgba(127,242,255,.40),0 0 18px rgba(127,242,255,.45);animation:etGlow 1.5s ease-in-out infinite}
+@keyframes etGlow{0%,100%{filter:brightness(1)}50%{filter:brightness(1.45)}}
 @keyframes mythGlow{0%,100%{filter:brightness(1)}50%{filter:brightness(1.28)}}
 .eqrow{display:flex;align-items:center;gap:7px;padding:5px;border-radius:9px;border:1px solid rgba(255,255,255,.05);margin-bottom:4px}
 .eqrow .cell{width:40px;height:40px;aspect-ratio:auto;flex:0 0 auto;font-size:18px}
@@ -346,6 +357,7 @@ h4.sec:first-child{margin-top:2px}
   <div id="autobtn"><span id="autoIc">▶</span><span id="autoTx">AUTO QUEST</span></div>
   <div id="autostate" class="noev"></div>
 
+  <div id="ovbar"><div id="ovLabel">STANDING</div><div id="ovCount">1001</div><div id="ovDelta"></div></div>
   <div id="tracker" class="noev"></div>
   <div id="chat" class="noev"></div>
 

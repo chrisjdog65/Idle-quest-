@@ -36,7 +36,36 @@ titles:
 
 If one adventurer takes both individual crowns it is announced as a **sweep**. Every
 season's winners are written into a permanent archive that survives the wipe and every
-season after it, and then everyone — you included — restarts at level 1 with nothing.
+season after it.
+
+### The Overlord
+
+Then, in the one window between the crowns and the new world — reachable no other way,
+and never again — **Kaarnathul, the Unmade** rises, and all 1000 adventurers plus you
+fight it at once.
+
+It is close to an even fight, and deliberately so: the Overlord's health is not a number
+anyone picked. At the moment the season ends the world runs the battle twenty-five times
+against a boss that cannot die, measures what this particular raid is capable of, and
+gives the Overlord the median of those readings. The raid wins exactly when it beats its
+own median. Measured over 9,600 finales: **the world falls 49% of the time, holds 44%,
+and about 7% of the time kills it with nobody left alive.**
+
+Everything the fight turns on is a named cast you watch land — Grave Tide, Maw of the
+Unmade, Hungering Gloom — so a defeat is never mysterious. You can read the log and say
+which one did it.
+
+**Only survivors are rewarded**, and survivors are rare: usually around thirty of the
+thousand. A pyrrhic kill with nobody standing pays nothing at all. Those who walk away
+take an **Eternal** relic — a seventh rarity tier above Mythic, and the only object in
+the game that outlives a season. Mythic dies with its world. Eternals come with you into
+the next one, on a level-1 character.
+
+You are enrolled whether or not you are watching. If the season turns over while you are
+asleep, the Overlord still rises, your character still fights, and you find out on return
+whether you were one of the ones left standing.
+
+Then everyone — you included — restarts at level 1 with nothing.
 
 A **seven real day** clock still runs as an outer backstop: if nobody reaches level 200
 in a week, the season ends on the timer and crowns the same three titles.
@@ -62,6 +91,8 @@ earning while the tab is closed. Turn it off any time and take over mid-fight.
 | **Population** | 1000 AI adventurers across 6 classes and 48 clans, simulated online and offline |
 | **Items** | Procedurally generated across 6 rarity tiers — Common, Uncommon, Rare, Epic, Legendary, **Mythic** — with unbounded item level, 11 stats and 16 affixes |
 | **Ascendants** | Mythic is not a drop. The **first 3 adventurers to reach level 200** are handed it, and claiming the third seat starts the season's ten-minute final call |
+| **The Overlord** | A one-shot last stand between the crowns and the new season: 1001 against one boss, self-calibrated to a near-even fight, survivors only |
+| **Eternal** | A 7th rarity tier above Mythic, taken off the Overlord by those who survive it — the only gear that carries across the season wipe |
 | **Progression** | No level cap. No gear cap. The race to 200 is the ceiling |
 | **Social** | Clans with respect points, automatic clan wars, a live trade post, incoming trade offers, world/guild/trade chat |
 | **Whispers** | Click any adventurer to give them gold or an item, or to ask them for one. They answer in their own voice and can refuse — and they whisper you with requests of their own |

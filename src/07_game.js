@@ -16,6 +16,7 @@ const G = {
   inRaid: null, raidStage: 0, raidT: 0,
   deathT: 0, resT: 0, victoryT: 0,
   indoorB: null, indoorT: 0,
+  overlord: null,
   toastQ: [],
 };
 
@@ -112,7 +113,8 @@ function resourceMax(p) {
 /* ------------------------------ ENTITY FACTORY ------------------------------ */
 function newAnim() { return { t: Math.random() * 10, spd: 0, run: 0, atk: 0, cast: 0, dead: 0, air: 0 }; }
 function rarityGlow(t) {
-  if (t >= 5) return { g: 1.0, c: [1.0, .25, .38] };
+  if (t >= 6) return { g: 1.5, c: [.49, .95, 1] };            // Eternal, or every bearer glows Mythic red
+  if (t === 5) return { g: 1.0, c: [1.0, .25, .38] };
   if (t === 4) return { g: 0.62, c: [1.0, .58, .12] };
   if (t === 3) return { g: 0.26, c: [.70, .35, .95] };
   return { g: 0, c: [1, 1, 1] };
@@ -177,6 +179,76 @@ function spawnMob(x, z, level, rank, famName, zoneId) {
   e.wpnLen = 1; e.cape = rank === 2;
   G.ents.push(e);
   return e;
+}
+/* ---- THE OVERLORD ----
+   Deliberately kind:'boss' with isMob:1. That is what earns it the giant health bar, the
+   boss music state, the taller nameplate and the target star, all for free — a custom kind
+   would get none of it and would be invisible to tap-to-target. Its health is written from
+   the tape every frame and never from damage taken; the fight was decided before it rose. */
+/* Open ground for the last stand. If the season ended while the player was standing in a
+   town, the Overlord is behind a roofline and the whole beat is lost — so the muster
+   moves to somewhere with a horizon, and the player is moved with it. */
+function ovArenaSpot(px, pz) {
+  let best = null, bestS = -1;
+  for (let i = 0; i < 60; i++) {
+    const a = Math.random() * TAU, d = 90 + Math.random() * 160;
+    const x = px + Math.cos(a) * d, z = pz + Math.sin(a) * d;
+    const h = groundH(x, z);
+    if (h < WATER_Y + 1.5 || slopeAt(x, z) > 0.26) continue;
+    let hub = 1e9;
+    for (const p of POI.hubs) hub = Math.min(hub, V.dist(x, z, p.x, p.z));
+    if (hub < 120) continue;
+    const s = Math.min(hub, 400) - Math.abs(h - 14) * 2;
+    if (s > bestS) { bestS = s; best = [x, z]; }
+  }
+  return best;
+}
+function ovSpawnBoss(lv, hpMax, px, pz) {
+  // stand it clear so the silhouette reads against sky, not a roofline
+  let a = Math.random() * TAU, d = 46, x = px + Math.cos(a) * d, z = pz + Math.sin(a) * d;
+  for (let i = 0; i < 16; i++) {
+    if (!insideBuildingXZ(x, z, 6) && groundH(x, z) > WATER_Y + 1 && slopeAt(x, z) < .34) break;
+    a = Math.random() * TAU; x = px + Math.cos(a) * d; z = pz + Math.sin(a) * d;
+  }
+  const e = spawnBoss(Object.assign({}, DB.bosses[0], {
+    n: 'Kaarnathul', t: 'the Unmade', x, z2: z, z: zoneAt(x, z).id,
+    // visual mechanics only — spectacle, never feeding back into the ledger
+    lv, hp: 14, dmg: 1, lootTier: 5,
+    mech: BOSS_MECH.filter(m => m.k === 'aoe' || m.k === 'meteor' || m.k === 'void' || m.k === 'adds' || m.k === 'cleave'),
+  }));
+  e.overlord = 1;
+  e.bossId = -1;                      // never a real DB.bosses index, or BOSS_STATE is written for an unrelated boss
+  e.hp = e.hpMax = hpMax;
+  e.scale = 7; e.leash = 1e9; e.aggro = 1e9; e.speed = 2.2;
+  e.glow = 1.4; e.glowCol = [.55, .25, 1];
+  e.gearCol = [.10, .07, .16]; e.gearCol2 = [.06, .04, .10]; e.accent = [.55, .3, 1];
+  e.wpnCol = [.7, .4, 1]; e.wpnLen = 3.4;
+  return e;
+}
+/** Put a readable cross-section of the world around the player, not just the nearest 34. */
+function ovArenaSeed(L, tape) {
+  const p = G.player, n = Math.min(MAX_AI, 30);
+  const pool = [];
+  for (let j = 0; j < L.n - 1; j++) pool.push(j);
+  pool.sort((a, b) => L.ehp[b] - L.ehp[a]);
+  const pick = [];
+  for (let k = 0; k < n; k++) pick.push(pool[Math.floor(k * (pool.length - 1) / (n - 1))]);  // stratified across strength
+  for (const j of tape.survivors.slice(0, 3)) if (j !== L.pIdx && pick.indexOf(j) < 0) pick.push(j);
+  for (let k = 0; k < pick.length; k++) {
+    const rec = ROSTER[pick[k]]; if (!rec) continue;
+    const a = (k / pick.length) * TAU + Math.random() * .2, r = 12 + Math.random() * 16;
+    rec.x = p.x + Math.cos(a) * r; rec.z = p.z + Math.sin(a) * r;
+    rec.tx = rec.x; rec.tz = rec.z;
+    const e = spawnAIAvatar(rec);
+    if (e) e.ovIdx = pick[k];
+  }
+}
+/** A visible adventurer falls exactly when the ledger says their index fell. */
+function ovKillAvatar(e) {
+  if (e.dead) return;
+  e.dead = 1; e.an.dead = 1; e.deadT = 0;
+  burst(e.x, e.y + 1, e.z, 12, 2.4, 2.4, .22, .9, .5, .25, 0, .7);
+  if (Math.random() < .3) sfx('death', .45);
 }
 function spawnBoss(bdef) {
   const x = bdef.x, z = bdef.z2, y = groundH(x, z);
@@ -565,7 +637,7 @@ function giveItem(p, it, quiet) {
   }
   p.bags.push(it);
   p.stats.itemsFound++;
-  if (it.t >= 5) { p.mythic = 1; metaClaimMythic(p); }
+  if (it.t === 5) { p.mythic = 1; metaClaimMythic(p); }      // an Eternal must never consume an Ascendant seat
   if (!quiet) {
     sfx('loot', .9, it.t + 1);
     toast('<span class="q' + it.t + '">' + esc(it.n) + '</span> <span class="tiny">(' + RARITY[it.t].n + ' · ilvl ' + it.il + ')</span>', 'loot');
@@ -629,6 +701,10 @@ function sellJunk(p, keepTier) {
 
 /* ------------------------------ KILL / DEATH ------------------------------ */
 function onMobKilled(m, p) {
+  /* The Overlord is not a kill anyone gets credit for. updateMob routes ANY mob reaching
+     zero health through here regardless of who dealt the damage, which would hand the
+     player boss XP, gold, a loot roll and a BOSS_STATE write for a boss that does not exist. */
+  if (m.overlord) return;
   if (m.dead) return;
   m.dead = 1; m.an.dead = 1; m.deadT = 0;
   p.kills++;
@@ -709,8 +785,13 @@ function updateMob(e, dt, p) {
   const dp = V.dist(e.x, e.z, p.x, p.z);
   const canSee = !p.dead && dp < e.aggro;
   if (e.st === 'idle' && canSee) { e.st = 'chase'; if (e.kind === 'boss') { sfx('roar', 1); banner(e.name, e.title || 'Boss Encounter'); musicSet('boss'); } }
-  if (e.st === 'chase' && (p.dead || V.dist(e.x, e.z, e.hx, e.hz) > e.leash)) e.st = 'return';
-  if (e.st === 'return' && V.dist(e.x, e.z, e.hx, e.hz) < 3) { e.st = 'idle'; e.hp = e.hpMax; }
+  /* The Overlord never disengages and never goes home to heal. You dying is the expected
+     case, not a reason for it to walk away and reset its health bar. */
+  if (e.overlord) { e.st = 'chase'; }
+  else {
+    if (e.st === 'chase' && (p.dead || V.dist(e.x, e.z, e.hx, e.hz) > e.leash)) e.st = 'return';
+    if (e.st === 'return' && V.dist(e.x, e.z, e.hx, e.hz) < 3) { e.st = 'idle'; e.hp = e.hpMax; }
+  }
 
   let wx = 0, wz = 0, spd = 0;
   if (e.stunT > 0) { e.an.spd = 0; moveEntity(e, 0, 0, 0, dt); return; }
@@ -865,6 +946,7 @@ function aiSay(e) {
   chatPush(ch, '[' + e.name + ']: ' + s);
 }
 function updateAIAvatar(e, dt, p) {
+  if (e.dead) return;                  // nothing had ever damaged an avatar before the Overlord; a corpse kept walking and chatting
   e.an.t += dt;
   e.an.atk = Math.max(0, e.an.atk - dt * 2.6);
   e.atkCd = Math.max(0, e.atkCd - dt);
@@ -897,14 +979,20 @@ function updateAIAvatar(e, dt, p) {
       e.an.atk = 1;
       faceToward(e, e.foe.x, e.foe.z, dt, 30);
       const dmg = refDPS(rec.lv) * (0.55 + rec.gs / (refPrimary(rec.lv) * 9)) * 1.4;
-      e.foe.hp -= dmg;
+      /* Against the Overlord the swing is theatre: the ledger owns its health. The guard
+         has to sit around the write itself, not around the displayed value — 34 avatars
+         would otherwise mark it dead before any overwrite ran. The number that floats up
+         is still the real one this adventurer contributed. */
+      if (!e.foe.overlord) {
+        e.foe.hp -= dmg;
+        if (e.foe.hp <= 0 && !e.foe.dead) {
+          e.foe.dead = 1; e.foe.an.dead = 1; e.foe.deadT = 0;
+          burst(e.foe.x, e.foe.y + 1, e.foe.z, 10, 2.4, 2.4, .22, .9, .5, .25, 0, .7);
+        }
+      }
       e.foe.hitT = .16;
       dmgNumber(e.foe.x, e.foe.y + (e.foe.scale || 1) * 1.9, e.foe.z, Math.round(dmg), 'ally');
       burst(e.foe.x, e.foe.y + 1, e.foe.z, 4, 1.8, 2, .16, .8, .8, .95, 1, .4);
-      if (e.foe.hp <= 0 && !e.foe.dead) {
-        e.foe.dead = 1; e.foe.an.dead = 1; e.foe.deadT = 0;
-        burst(e.foe.x, e.foe.y + 1, e.foe.z, 10, 2.4, 2.4, .22, .9, .5, .25, 0, .7);
-      }
     }
     faceToward(e, e.foe.x, e.foe.z, dt, 8);
   } else {
@@ -932,6 +1020,8 @@ function updateSpawns(dt, p) {
   G.spawnT -= dt;
   if (G.spawnT > 0) return;
   G.spawnT = 0.6;
+  // during the finale nothing spawns, nothing respawns, and nothing is culled for distance
+  if (G.overlord) return;
   let mobs = 0, ais = 0;
   for (let i = G.ents.length - 1; i >= 0; i--) {
     const e = G.ents[i];
@@ -1128,7 +1218,9 @@ function updatePlayer(dt, input) {
   if (p.dead) {
     G.deathT += dt;
     p.an.spd = 0;
-    if (G.deathT > 3.2) revivePlayer(p);
+    // fall to the Overlord and you stay down and watch. Reviving would put you back on
+    // your feet 46 m away with immunity, and wrongly counted among the survivors.
+    if (G.deathT > 3.2 && !p.ovDown) revivePlayer(p);
     return;
   }
   R.dmgVig = Math.max(0, R.dmgVig - dt * 0.85);

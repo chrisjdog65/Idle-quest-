@@ -18,7 +18,12 @@ const RARITY = [
   { n: 'Epic', c: '#b45ef0', v: [.008, .012, .048, .14, .24, .33], mult: 2.25, af: 4, gv: 34 },
   { n: 'Legendary', c: '#ff9a1f', v: [.00012, .0002, .0011, .0090, .032, .080], mult: 3.15, af: 5, gv: 150 },
   { n: 'Mythic', c: '#ff3f5f', v: [0, 0, 0, 0, 0, 0], mult: 4.60, af: 6, gv: 900 },
+  /* Eternal is not a drop and not a grant. It is what you carry out of the Overlord
+     alive, and the only object in the game that outlives a season. rollTier's loop
+     runs t < 6, so nothing can ever roll into this tier by accident. */
+  { n: 'Eternal', c: '#7ff2ff', v: [0, 0, 0, 0, 0, 0], mult: 6.60, af: 8, gv: 3000 },
 ];
+const ETERNAL_TIER = 6;
 /* Mythic gear is not a drop at all. It is the prize for being one of the first
    three adventurers in the world to reach ASCEND_LEVEL — a race, not a lottery.
    Once the third seat is claimed the season enters its final ten minutes. */
@@ -82,6 +87,17 @@ const LEGEND_NAMES = ['Frostmourne\'s Echo', 'Sunsurge', 'Ashbringer\'s Ember', 
 const MYTHIC_NAMES = ['Aeon, the World\'s Last Word', 'Crown of the Sundered Sky', 'Heart of the First Flame',
   'The Unmaking', 'Godsgrave', 'Infinity\'s Edge', 'The Ascendant Star', 'Requiem of Kings', 'Eclipse Absolute',
   'The Thousandth Dawn', 'Voidheart Ascendant', 'Chronoshard'];
+/* Relics taken off the Overlord. Named for the thing that ended, because that is
+   what a survivor carries into the next world. */
+const ETERNAL_NAMES = ['Kaarnathul\'s Last Tooth', 'The Hour That Held', 'Vigil of the Thousand',
+  'What Remained', 'The Unbroken Line', 'Ashes of the Overlord', 'Testament', 'The Standing Stone',
+  'Oath of the Few', 'Nightfall Ended', 'The World\'s Last Word', 'Coil of the Unmade',
+  'Reliquary of Names', 'The Long Silence', 'Sunder, the Answer', 'Crown of the Held Hour',
+  'Mourncall', 'The Ninth Survivor', 'Ruin\'s Remembrance', 'Aeonlight', 'The Cost',
+  'Everstill', 'Wound of the Deathless', 'The Tally'];
+const ETERNAL_FLAVOR = ['"A thousand went in. This came out."', '"It remembers being carried."',
+  '"The only thing here older than the world."', '"You were standing when it fell."',
+  '"Every season forgets. This does not."', '"Taken, not given."'];
 const ITEM_FLAVOR = ['"It still remembers the hand that forged it."', '"Warm to the touch. Always."', '"Sing, and it answers."',
   '"Older than the mountains it was cut from."', '"They buried this. Twice."', '"Do not name it aloud."',
   '"The last king wore this to the end."', '"Light bends around the edge."', '"It hungers, politely."',
@@ -430,6 +446,61 @@ function buildContent() {
   buildZones(); buildQuests(); buildBosses(); buildRaids();
 }
 
+/* ------------------------------ THE OVERLORD ------------------------------
+   The grand finale. When the season's crowns are handed out, every adventurer in
+   the world -- all 1000 of them, and you -- takes the field against one thing.
+
+   The 50/50 is not a magic number, it is a construction. At the moment the season
+   ends we snapshot the whole army, run the fight 25 times against a boss that
+   cannot die to measure how much damage this raid is actually capable of, and set
+   the Overlord's health to the MEDIAN of those readings. The raid then wins exactly
+   when it beats its own median. There is no threshold to drift and no fudge factor,
+   and it stays even whether the world spent the season online or offline.
+
+   Everything the outcome turns on is a named cast you watched land. Each mechanic
+   rolls ONE severity and ONE coverage for the entire raid, so the uncertainty
+   cannot be averaged away across a thousand actors the way per-actor noise is.
+   Substitute those rolls with their means and the whole fight becomes perfectly
+   deterministic -- that is the proof there is nothing hiding in the noise. */
+const OV = {
+  DRY: 25,          // dry runs against an unkillable boss; the median sets its health
+  CAL: 1.00,        // deliberate thumb on the scale. 1.00 is an even fight, by construction
+  TICK: 1.0,        // seconds of fight time per simulation step
+  MAXT: 300,        // hard stop; a fight this long counts as a wipe
+  GRIND: 0.0055,    // fraction of a combatant's health the Overlord grinds off per second
+  REGEN: 0.0098,    // and what they heal back. Baseline FAVOURS the raid, so the field holds
+  FOCUS: 0.65,      // steady early and collapses late -- which is the shape you want to watch
+  RAMP: 55, RAMPP: 1.10,             // time escalation: it does not get tired, you do
+  CASTMIN: 4, CASTMAX: 9,            // seconds between named mechanics
+  SEVLO: 0.62, SEVHI: 1.48,          // ONE common severity roll per cast
+  COVLO: 0.70, COVHI: 1.35,          // ONE common coverage roll per cast
+  THROE_N: 3, THROE_SEV: 0.100, THROE_GROW: 1.55, THROE_JIT: 0.30,
+  RESOLVE: 1.35,    // the player's one declared advantage over an equivalent adventurer
+  SHOW_S: 80,       // wall-clock seconds the replay takes, whatever the fight's real length
+  ACK_S: 45,        // unattended: seconds on the result screen before the next season starts
+  CARRY_MAX: 48,    // relics the world may hold at once, or Eternal stops being eternal
+  CATCHUP_MAX: 3,   // seasons resolved in one offline catch-up
+};
+/* The deck. sev = fraction of effective health to whoever it catches; cov = share of
+   the raid caught; esc = how much worse it makes everything after it; heal = fraction
+   of the raid's opening DPS handed back to the boss. Names are what you read on the
+   cast bar a beat before it lands, and what you blame afterwards. */
+const OV_MECH = [
+  { n: 'Sundering Roar', sev: 0.16, cov: 0.95, esc: 1.000, heal: 0, d: 'The whole field staggers.' },
+  { n: 'Cinder Rain', sev: 0.30, cov: 0.62, esc: 1.000, heal: 0, d: 'Fire falls across the muster.' },
+  { n: 'Maw of the Unmade', sev: 1.35, cov: 0.18, esc: 1.000, heal: 0, d: 'It eats what it closes on.' },
+  { n: 'Voidfall', sev: 0.62, cov: 0.44, esc: 1.000, heal: 0, d: 'The ground opens where you stand.' },
+  { n: 'Grave Tide', sev: 0.78, cov: 0.55, esc: 1.000, heal: 0, d: 'A wave that does not break.' },
+  { n: 'Hungering Gloom', sev: 0.20, cov: 0.40, esc: 1.000, heal: 4.5, d: 'It drinks the work back off its own wounds.' },
+  { n: 'Rite of Ending', sev: 0.00, cov: 0.00, esc: 1.070, heal: 0, d: 'No blow lands. Everything after is worse.' },
+  { n: 'Ashen Bulwark', sev: 0.10, cov: 0.30, esc: 1.045, heal: 1.6, d: 'It shrouds itself and presses.' },
+  { n: 'Cull the Weak', sev: 0.95, cov: 0.26, esc: 1.000, heal: 0, d: 'It goes looking for the hurt.' },
+  { n: 'Waning Hour', sev: 0.24, cov: 0.70, esc: 0.955, heal: 0, d: 'It overreaches, and pays for it.' },
+];
+const OV_MECH_W = [16, 13, 11, 12, 9, 8, 7, 8, 8, 8];
+/** Item level of a relic taken off an Overlord fought at `level`. */
+function eternalIlvl(level) { return Math.round(refIlvl(Math.max(1, level)) * 1.18 + 60); }
+
 /* ------------------------------ ITEM ENGINE ------------------------------ */
 /** Roll a rarity tier from a drop-quality context (0=trash .. 5=mythic source) */
 function rollTier(rng, srcQuality, luck) {
@@ -471,7 +542,7 @@ function genItem(rng, ilvl, tier, slotKey, classId) {
   // affixes
   const af = [];
   const apool = AFFIXES.slice(); rng.shuffle(apool);
-  const nAf = clamp(R.af - 1 + (rng.chance(.35) ? 1 : 0), 0, 6);
+  const nAf = clamp(R.af - 1 + (rng.chance(.35) ? 1 : 0), 0, 7);
   for (let i = 0; i < nAf; i++) {
     const a = apool[i]; if (!a) break;
     af.push({ k: a.k, n: a.n, v: Math.max(1, Math.round((2 + ilvl * .06) * (1 + tier * .3) * rng.r(.7, 1.3))) });
@@ -483,7 +554,8 @@ function genItem(rng, ilvl, tier, slotKey, classId) {
   let name, base;
   if (slot.k === 'weapon') base = rng.pick(cls.wpn);
   else base = rng.pick(BASE_NAMES[slot.k]);
-  if (tier === 5) name = rng.pick(MYTHIC_NAMES);
+  if (tier === 6) name = rng.pick(ETERNAL_NAMES);
+  else if (tier === 5) name = rng.pick(MYTHIC_NAMES);
   else if (tier === 4) name = rng.chance(.6) ? rng.pick(LEGEND_NAMES) : rng.pick(ITEM_PREFIX) + rng.pick(ITEM_MID) + ' ' + base;
   else if (tier >= 2) name = rng.pick(ITEM_PREFIX) + base.toLowerCase() + ' ' + rng.pick(ITEM_SUFFIX);
   else if (tier === 1) name = rng.pick(ITEM_PREFIX) + ' ' + base;
@@ -491,7 +563,7 @@ function genItem(rng, ilvl, tier, slotKey, classId) {
 
   const it = {
     u: ITEM_UID++, n: name, t: tier, il: ilvl, sl: slot.k, st, af, w: wdps,
-    ic: slot.ic, fl: tier >= 4 ? rng.pick(ITEM_FLAVOR) : '',
+    ic: slot.ic, fl: tier === 6 ? rng.pick(ETERNAL_FLAVOR) : tier >= 4 ? rng.pick(ITEM_FLAVOR) : '',
     cls: classId, base,
   };
   it.sc = itemScore(it);

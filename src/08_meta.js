@@ -243,6 +243,10 @@ function metaClaimMythic(p) { return tryAscend(p); }
 
 /* ------------------------------ TICK ------------------------------ */
 function metaTick(dt) {
+  /* While the Overlord holds, the world stops. The finale was resolved against a snapshot
+     of the roster; letting it keep levelling and looting underneath the result screen
+     would leave the survivor list disagreeing with the leaderboard beside it. */
+  if (ovIsActive()) { ovAckTick(dt); return; }
   metaAcc += dt;
   let steps = 0;
   while (metaAcc >= META_STEP && steps++ < 4) {
@@ -925,7 +929,339 @@ function checkSeason() {
   if (seasonLeft() > 0) return;
   endSeason();
 }
-function endSeason() {
+/* ========================= THE OVERLORD: THE FINALE =========================
+   Available in exactly one window: after the crowns are handed out and before the
+   next season begins. It cannot be travelled to, ground, or retried.
+
+   THE WHOLE FIGHT RESOLVES SYNCHRONOUSLY, in one pass, the instant the season ends.
+   The 3D battle you watch afterwards is a replay of a tape that is already written.
+   That is what makes watching it, idling through it and being asleep for it all
+   produce the same answer, and what makes a reload mid-fight impossible to exploit. */
+const ETERNAL = { p: [], ai: [] };      // the carry store: survives the wipe
+
+/* Score the player through the SAME pipeline as the 1000. This matters more than it
+   looks: p.st.hpMax comes from real item stamina at the player's real rarity multiplier
+   while refHP hard-codes 1.55, and p.st.dps skips refDPS's /1.45 and carries versatility
+   and mastery. Mixing the two bases hands a perfectly average player 1.64x the effective
+   health and 2.58x the damage of an identically-geared adventurer -- which does not move
+   the raid's outcome at all, but takes their personal survival from 2% to 34% and quietly
+   ends the scarcity of the rarest item in the game. Nothing crashes. There is no symptom. */
+function ovPlayerRecord() {
+  const p = G.player, gt = new Array(15).fill(0), gi = new Array(15).fill(0);
+  SLOT_KEYS.forEach((k, idx) => { const it = p.gear[k]; if (it) { gt[idx] = it.t + 1; gi[idx] = it.il; } });
+  return { i: -1, n: p.name, c: p.cls, lv: p.level, gt, gi, gs: recGearScore({ gt, gi }), isPlayer: true };
+}
+/** Line up all 1001 combatants as flat arrays of damage and effective health. */
+function ovMuster(seed) {
+  const rng = new RNG(seed);
+  const recs = ROSTER.slice();
+  recs.push(ovPlayerRecord());
+  const n = recs.length;
+  const dps = new Float64Array(n), ehp = new Float64Array(n), lv = new Int32Array(n);
+  for (let j = 0; j < n; j++) {
+    const r = recs[j];
+    const gm = 0.55 + r.gs / (refPrimary(r.lv) * 9);       // the gear-fit term updateAIAvatar uses
+    dps[j] = refDPS(r.lv) * gm * 1.4 / 1.9;                // per second (refDPS is per swing)
+    ehp[j] = refHP(r.lv) * (0.25 + 0.75 * Math.min(2.20, gm)) * rng.r(0.75, 1.30);
+    lv[j] = r.lv;
+  }
+  ehp[n - 1] *= OV.RESOLVE;                                 // the player's one declared edge
+  let d0 = 0; for (let j = 0; j < n; j++) d0 += dps[j];
+  const sorted = Float64Array.from(ehp).sort();
+  return { recs, n, dps, ehp, lv, d0, medEhp: sorted[n >> 1], pIdx: n - 1 };
+}
+/* One fight. With bossHP = Infinity this is a DRY RUN and `cap` comes back as the most
+   cumulative damage the raid ever had on the board.
+   TWO INVARIANTS THAT MUST NEVER BE BROKEN, both silent if they are:
+   1. cap is the RUNNING PEAK, not the final total. Hungering Gloom heals the boss, so
+      cumulative damage is not monotonic and the final total under-sizes the Overlord.
+   2. NOTHING in this fight may key off the boss's own health fraction. A low-health
+      enrage would make capacity depend on the health being calibrated, and the whole
+      50/50 guarantee becomes circular. All escalation is on the clock. */
+function ovFight(L, bossHP, seed, wantTape) {
+  const rng = new RNG(seed), n = L.n;
+  const hp = Float64Array.from(L.ehp);
+  const live = new Int32Array(n); for (let j = 0; j < n; j++) live[j] = j;
+  const deathAt = wantTape ? new Float32Array(n).fill(-1) : null;
+  const log = wantTape ? [] : null;
+  let alive = n, boss = bossHP, net = 0, peak = 0, t = 0, esc = 1, castT = rng.r(OV.CASTMIN, OV.CASTMAX);
+  let raidDps = L.d0, pAlive = true;
+  const kill = k => {                                       // swap-remove: loops stay O(alive)
+    const j = live[k]; raidDps -= L.dps[j];
+    if (deathAt) deathAt[j] = t;
+    if (j === L.pIdx) pAlive = false;
+    live[k] = live[--alive];
+  };
+  while (t < OV.MAXT && alive > 0) {
+    const ramp = Math.pow(1 + t / OV.RAMP, OV.RAMPP) * esc;
+    const focus = 1 + OV.FOCUS * (1 - alive / n);            // it turns on the few that are left
+    net += raidDps * OV.TICK; if (net > peak) peak = net;
+    boss -= raidDps * OV.TICK;
+    if (boss <= 0) break;
+    const wear = OV.GRIND * ramp * focus * OV.TICK, heal = OV.REGEN * OV.TICK;
+    for (let k = alive - 1; k >= 0; k--) {
+      const j = live[k], e = L.ehp[j];
+      const v = Math.min(e, hp[j] - e * wear + e * heal);
+      hp[j] = v; if (v <= 0) kill(k);
+    }
+    castT -= OV.TICK;
+    if (castT <= 0 && alive > 0) {
+      castT = rng.r(OV.CASTMIN, OV.CASTMAX);
+      const m = OV_MECH[rng.wpick(OV_MECH.map((x, i) => i), OV_MECH_W)];
+      const sev = m.sev * rng.r(OV.SEVLO, OV.SEVHI) * ramp;  // ONE roll, whole raid
+      const cov = Math.min(1, m.cov * rng.r(OV.COVLO, OV.COVHI));
+      const before = alive;
+      if (sev > 0 && cov > 0) for (let k = alive - 1; k >= 0; k--) {
+        const j = live[k];
+        if (rng.f() < cov) { hp[j] -= L.ehp[j] * sev; if (hp[j] <= 0) kill(k); }
+      }
+      /* A heal has to come off `net` too. net tracks the boss's actual health LOSS, which
+         is what makes it non-monotonic and what makes peak(net) >= bossHP exactly equivalent
+         to the boss dying. Accumulating raw damage instead leaves the calibration blind to
+         every heal and under-sizes the boss -- measured cost, 12 points of win rate.
+         Not clamped to bossHP: the dry run has nothing to clamp against, and an asymmetry
+         between the two paths is exactly what the whole construction cannot survive. */
+      if (m.heal) { const h = m.heal * L.d0 * rng.r(0.6, 1.4); boss += h; net -= h; }
+      esc *= m.esc;
+      if (log) log.push({ t: Math.round(t), n: m.n, d: m.d, cov: +cov.toFixed(2), dead: before - alive, alive });
+    }
+    t += OV.TICK;
+  }
+  const fell = boss <= 0;
+  /* THE DEATH THROES. Only if it fell -- and this is what makes survival a merit filter
+     rather than a lottery: the blast is an absolute magnitude, so the axis it cuts is
+     effective health itself. A blast written as a fraction of your own health would kill
+     either nobody or everybody. */
+  if (fell) {
+    const base = Math.pow(1 + t / OV.RAMP, OV.RAMPP) * esc;
+    for (let s = 0; s < OV.THROE_N; s++) {
+      const blast = OV.THROE_SEV * Math.pow(OV.THROE_GROW, s) * base * L.medEhp * rng.r(0.85, 1.15);
+      const before = alive;
+      for (let k = alive - 1; k >= 0; k--) {
+        const j = live[k];
+        hp[j] -= blast * rng.r(1 - OV.THROE_JIT, 1 + OV.THROE_JIT);
+        if (hp[j] <= 0) kill(k);
+      }
+      if (log) log.push({ t: Math.round(t), n: 'THE THROES', d: 'Its death takes the field with it.', cov: 1, dead: before - alive, alive, throe: 1 });
+    }
+  }
+  const out = {
+    cap: peak, fell, alive, dur: t, pAlive: pAlive && (fell || alive > 0) && fell,
+    bossLeft: fell ? 0 : Math.max(0, boss / bossHP),
+    outcome: !fell ? 0 : alive > 0 ? 2 : 1,                  // 0 wipe, 1 pyrrhic, 2 victory
+  };
+  if (wantTape) {
+    out.deathAt = deathAt; out.log = log;
+    out.survivors = []; for (let k = 0; k < alive; k++) out.survivors.push(live[k]);
+    out.pDeath = deathAt[L.pIdx];
+  }
+  return out;
+}
+/* Size the Overlord to the raid it is actually about to face. P(win) = P(this raid beats
+   its own median performance) = 0.5, by construction -- no threshold, no tuned health, and
+   immune to how strong or how loot-starved the season left the world. */
+function ovCalibrate(L, seed) {
+  const caps = [];
+  for (let i = 0; i < OV.DRY; i++)
+    caps.push(ovFight(L, Infinity, ((seed * 0x9E3779B1) ^ (i * 0x85EBCA6B)) | 0, false).cap);
+  caps.sort((a, b) => a - b);
+  return caps[(OV.DRY - 1) >> 1] * OV.CAL;
+}
+/* Drawn fresh, never from SEED. SEED is a source literal (20260827), so a fight seeded
+   from it would hand every copy of the game the same win/loss schedule per season number
+   -- discoverable the first time two players compare notes. Persisted once drawn, so the
+   replay is exact and re-entry can never re-roll the result. */
+function ovSeedFor() { return ((Math.random() * 0x7fffffff) | 0) || 1; }
+function ovIsActive() { return !!(SEASON.ov && SEASON.ov.n === SEASON.num && SEASON.ov.ph >= 1 && SEASON.ov.ph < 5); }
+function ovSeasonLevel() { let m = 1; for (const r of ROSTER) if (r.lv > m) m = r.lv; return m; }
+
+/** Fight it. Synchronous, ~20 ms, and the outcome is final the moment this returns. */
+function ovResolve(quiet) {
+  if (SEASON.ov && SEASON.ov.n === SEASON.num) return SEASON.ov;   // idempotent: never fight twice
+  const seed = ovSeedFor();
+  const L = ovMuster(seed ^ 0x51ED270B);
+  const bossHP = ovCalibrate(L, seed);
+  const res = ovFight(L, bossHP, seed, true);
+  const lvl = ovSeasonLevel();
+  // how many of the 25 augury runs beat the health it was given: the honest odds, after the fact
+  let omens = 0;
+  for (let i = 0; i < OV.DRY; i++)
+    if (ovFight(L, Infinity, ((seed * 0x9E3779B1) ^ (i * 0x85EBCA6B)) | 0, false).cap >= bossHP) omens++;
+  const ov = {
+    n: SEASON.num, ph: 1, seed, lvl, bossHP: Math.round(bossHP), d0: Math.round(L.d0),
+    outcome: res.outcome, alive: res.alive, dur: Math.round(res.dur),
+    bossLeft: +res.bossLeft.toFixed(3), omens, dry: OV.DRY,
+    pAlive: res.outcome === 2 && res.survivors.indexOf(L.pIdx) >= 0,
+    pDeath: res.pDeath >= 0 ? Math.round(res.pDeath) : -1,
+    log: res.log.map(x => ({ t: x.t, n: x.n, dead: x.dead, alive: x.alive })),
+    names: [], guilds: {},
+  };
+  // who lived, by name, and what it cost each guild
+  const surv = res.survivors.filter(j => j !== L.pIdx).map(j => ROSTER[j]).filter(Boolean);
+  ov.names = surv.slice(0, 40).map(r => ({ n: r.n, lv: r.lv, g: r.g }));
+  ov.survIdx = surv.map(r => r.i);
+  for (const g of GUILDS) ov.guilds[g.n] = { went: g.members.length, out: 0 };
+  for (const r of surv) { const g = r.g >= 0 && GUILDS[r.g] ? GUILDS[r.g].n : null; if (g && ov.guilds[g]) ov.guilds[g].out++; }
+  SEASON.ov = ov;
+  if (!quiet) {
+    chatPush('world', ov.outcome === 2 ? '═══ THE WORLD HELD — ' + ov.alive + ' stood ═══'
+      : ov.outcome === 1 ? '═══ A HOLLOW VICTORY — it died, and so did everyone ═══'
+        : '═══ THE WORLD HAS FALLEN — the Overlord finished at ' + Math.round(ov.bossLeft * 100) + '% ═══');
+  }
+  return ov;
+}
+/** Mint a relic and hand it to everyone still standing. Idempotent on SEASON.ov.n. */
+function ovAward() {
+  const ov = SEASON.ov;
+  if (!ov || ov.ph >= 3) return;
+  ov.ph = 3;
+  if (ov.outcome !== 2) return;                              // wipe and pyrrhic pay nothing
+  const rng = new RNG((ov.seed ^ 0x2545F491) | 0);
+  if (ov.pAlive) {
+    const it = genItem(rng, eternalIlvl(ov.lvl), ETERNAL_TIER, rng.pick(SLOT_KEYS), G.player.cls);
+    it.src = { s: ov.n, k: 'Kaarnathul, the Unmade' };
+    ETERNAL.p.push(it);
+  }
+  /* AI relics are re-granted next season onto roster indices 40+ ONLY. buildRoster gives
+     0-39 a skill bonus; relics landing there took 2.25 of the 3 Ascendant seats in testing
+     against 0.00 on random indices. Same relics, same count, opposite game. */
+  for (const r of ov.survIdx) {
+    if (ETERNAL.ai.length >= OV.CARRY_MAX) break;
+    ETERNAL.ai.push({ il: eternalIlvl(ov.lvl), s: ov.n });
+  }
+  while (ETERNAL.ai.length > OV.CARRY_MAX) ETERNAL.ai.shift();
+}
+/* ---- the live battle: a replay of a tape that is already written ---- */
+function ovLiveReplayPossible() {
+  return !!(G.started && G.player && typeof document !== 'undefined' && !document.hidden && !OV_HEADLESS);
+}
+let OV_HEADLESS = 0, ovAckT = 0;
+/** Stand the Overlord up in the world and put the visible adventurers around it. */
+function ovBegin() {
+  const ov = SEASON.ov; if (!ov) return;
+  const p = G.player;
+  G.ents.length = 0; G.proj.length = 0; G.dmg.length = 0; G.target = null; G.inRaid = null;
+  p.dead = 0; p.ovDown = 0; p.hp = p.st.hpMax;
+  const spot = ovArenaSpot(p.x, p.z);
+  if (spot) { p.x = spot[0]; p.z = spot[1]; p.y = groundH(p.x, p.z); p.vy = 0; }
+  const boss = ovSpawnBoss(ov.lvl, ov.bossHP, p.x, p.z);
+  // rebuild the tape from the persisted seed: pure function of (snapshot, seed), ~2 ms
+  const L = ovMuster(ov.seed ^ 0x51ED270B);
+  const tape = ovFight(L, ov.bossHP, ov.seed, true);
+  G.overlord = {
+    boss, L, tape, t: 0, rate: Math.max(0.2, tape.dur / OV.SHOW_S),
+    li: 0, cast: null, castT: 0, alive: L.n, shown: 0, done: 0, throeT: -1,
+  };
+  ovArenaSeed(L, tape);
+  /* Turn and look at it. The whole beat is the thing being enormous and in front of you,
+     and a boom camera left pointing wherever the player last walked shows them a field. */
+  G.camYaw = Math.atan2(boss.x - p.x, boss.z - p.z);
+  G.camPitch = 0.42; G.camDist = 15;
+  banner('THE OVERLORD', 'Kaarnathul, the Unmade');
+  chatPush('world', '═══ THE OVERLORD RISES — every adventurer alive stands against it ═══');
+  musicSet('boss', true);
+  if ($('ovbar')) $('ovbar').classList.add('on');
+}
+/** Advance the replay. Never simulates — only reads what was already decided. */
+function ovReplayTick(dt) {
+  const O = G.overlord; if (!O || O.done) return;
+  const ov = SEASON.ov;
+  if (typeof document !== 'undefined' && document.hidden) { ovReplayEnd(); return; }
+  O.t += dt * O.rate;
+  const tape = O.tape;
+  // deaths land exactly when the ledger says they did — same simulation, 34x zoom
+  for (const e of G.ents) {
+    if (e.kind !== 'ai' || e.dead || e.ovIdx == null) continue;
+    const d = tape.deathAt[e.ovIdx];
+    if (d >= 0 && O.t >= d) ovKillAvatar(e);
+  }
+  if (!G.player.ovDown && tape.pDeath >= 0 && O.t >= tape.pDeath) {
+    G.player.ovDown = 1; G.player.dead = 1;
+    banner('YOU FELL', 'at ' + ovClock(tape.pDeath));
+  }
+  // named casts drive the bar and the count
+  while (O.li < tape.log.length && tape.log[O.li].t <= O.t) {
+    const c = tape.log[O.li++];
+    O.cast = c; O.castT = 1.6; O.alive = c.alive;
+    if (c.dead > 0) toast('<b>' + esc(c.n) + '</b><div class="tiny">−' + c.dead + ' standing</div>', 'big');
+    if (c.throe) { R.flash = 1; G.camShake = 0.9; }
+    else if (c.dead > 40) G.camShake = Math.min(0.7, 0.2 + c.dead / 600);
+  }
+  if (O.castT > 0) O.castT -= dt;
+  // the boss bar is the race; the counter is the cost
+  const frac = Math.max(0, 1 - O.t / Math.max(1, tape.dur));
+  O.boss.hp = Math.max(1, O.boss.hpMax * (tape.fell ? frac : Math.max(tape.bossLeft, frac)));
+  O.boss.scale = 7 + 5 * Math.min(1, O.t / Math.max(1, tape.dur));   // it grows as the field thins
+  if (O.t >= tape.dur + 4) ovReplayEnd();
+}
+function ovReplayEnd() {
+  const O = G.overlord; if (!O || O.done) return;
+  O.done = 1;
+  const ov = SEASON.ov, tape = O.tape;
+  if (tape.fell) { O.boss.hp = 0; O.boss.dead = 1; O.boss.an.dead = 1; }
+  banner(ov.outcome === 2 ? 'THE WORLD HELD' : ov.outcome === 1 ? 'A HOLLOW VICTORY' : 'THE WORLD HAS FALLEN',
+    ov.outcome === 2 ? ov.alive + ' stood' : ov.outcome === 1 ? 'It died. So did everyone.'
+      : 'The Overlord finished at ' + Math.round(ov.bossLeft * 100) + '%');
+  musicSet(ov.outcome === 2 ? 'victory' : 'night', true);
+  if ($('ovbar')) $('ovbar').classList.remove('on');
+  if ($('tcast')) $('tcast').classList.remove('on');
+  G.overlord = null;
+  ov.ph = 4;
+  showSeasonEnd(SEASON.champions[0]);
+  saveGame();
+}
+/** Unattended: after a beat on the result screen, start the next season without a tap. */
+function ovAckTick(dt) {
+  const ov = SEASON.ov; if (!ov) return;
+  if (ov.ph === 2) return;                                   // the replay owns the clock
+  if (ov.ph < 4 || !G.player || !G.player.autoOn) return;
+  ovAckT += dt;
+  if (ovAckT >= OV.ACK_S) { ovAckT = 0; ovStartNextSeason(); }
+}
+function ovClock(s) { return Math.floor(s / 60) + ':' + String(Math.floor(s % 60)).padStart(2, '0'); }
+/** Your live odds of walking out, shown during the final call. Same pipeline as everyone. */
+function ovSurvivalOdds() {
+  if (!G.player || !ROSTER.length) return 0;
+  const L = ovMuster(0x1234567), seed = 20260827;
+  let lived = 0, runs = 9;
+  for (let i = 0; i < runs; i++) {
+    const s = ((seed * 0x9E3779B1) ^ (i * 0xC2B2AE35)) | 0;
+    const hp0 = ovCalibrate(L, s);
+    const r = ovFight(L, hp0, s, true);
+    if (r.outcome === 2 && r.survivors.indexOf(L.pIdx) >= 0) lived++;
+  }
+  return lived / runs;
+}
+function ovStatusLine() {
+  const O = G.overlord;
+  if (!O) return '';
+  return '<b style="color:#7ff2ff">THE OVERLORD</b> · ' + O.alive + ' standing';
+}
+/** Dress the fresh level-1 player in whatever they carried out. */
+function ovCarryApplyPlayer(np) {
+  for (const it of ETERNAL.p) {
+    const old = np.gear[it.sl];
+    np.gear[it.sl] = it;
+    if (old && np.bags.length < np.bagMax) np.bags.push(old);
+  }
+}
+/** And the AI bearers, never onto the elite block. */
+function ovCarryApplyRoster() {
+  if (!ETERNAL.ai.length) return;
+  const rng = new RNG((SEASON.num * 2654435761) | 0);
+  const taken = new Set();
+  for (const rel of ETERNAL.ai) {
+    let i = 0, guard = 0;
+    do { i = 40 + rng.i(Math.max(1, ROSTER.length - 40)); } while (taken.has(i) && guard++ < 40);
+    taken.add(i);
+    const rec = ROSTER[i]; if (!rec) continue;
+    const sl = rng.i(15);
+    rec.gt[sl] = ETERNAL_TIER + 1; rec.gi[sl] = rel.il;
+    rec.gs = recGearScore(rec); rec.best = ETERNAL_TIER;
+  }
+}
+function endSeason(quiet) {
+  if (SEASON.ended && SEASON.ov && SEASON.ov.n === SEASON.num) return;   // startGame has no ended-guard; do not crown or fight twice
   SEASON.ended = true;
   const all = hallOfFame(POP + 1);
   // two separate crowns: highest level, and greatest gear power
@@ -953,8 +1289,15 @@ function endSeason() {
   SEASON.champions.unshift(rec);
   // the roll of champions is permanent — every season ever played, kept forever
   if (SEASON.champions.length > 400) SEASON.champions.pop();
-  showSeasonEnd(rec);
-  musicSet('victory', true);
+  /* The Overlord rises the moment the crowns are handed out. Resolving it HERE, before
+     showSeasonEnd and before the saveGame two lines down, is what persists the verdict
+     for free and makes a reload mid-finale impossible to re-roll. */
+  const ov = ovResolve(quiet);
+  rec.ov = { outcome: ov.outcome, alive: ov.alive, dur: ov.dur, bossLeft: ov.bossLeft,
+    omens: ov.omens, dry: ov.dry, pAlive: ov.pAlive, lvl: ov.lvl };
+  ovAward();
+  if (ovLiveReplayPossible()) { ov.ph = 2; ovBegin(); }
+  else { ov.ph = 4; showSeasonEnd(rec); musicSet('victory', true); }
   saveGame();
 }
 function startNewSeason() {
@@ -964,7 +1307,10 @@ function startNewSeason() {
   SEASON.milestone = 0;
   SEASON.ascended = [];
   MYTHIC_HOLDERS.clear();
+  // ETERNAL is deliberately NOT cleared here. Mythic dies with its season; relics do not.
+  SEASON.ov = null;
   buildRoster(SEED ^ (SEASON.num * 7919));
+  ovCarryApplyRoster();
   for (const k in RAID_LOCK) delete RAID_LOCK[k];
   for (const k in BOSS_STATE) delete BOSS_STATE[k];
   TRADE_BOARD.length = 0; WAR_LOG.length = 0;
@@ -974,6 +1320,11 @@ function startNewSeason() {
   const np = makePlayer(keepName, keepCls);
   np.stats.seasons = (p.stats.seasons || 0) + 1;
   np.autoOn = p.autoOn; np.autoMode = p.autoMode;
+  /* Whatever you carried out of the Overlord comes with you into a level-1 world.
+     This is the only gear in the game that survives a wipe. */
+  ovCarryApplyPlayer(np);
+  np.st = calcStats(np); np.resMax = resourceMax(np); np.hp = np.st.hpMax;
+  styleFromGear(np, np.gear, np.cls);
   G.player = np;
   G.ents.length = 0; G.proj.length = 0; G.gfx.length = 0; G.dmg.length = 0;
   G.target = null; G.inRaid = null; G.lastZone = -1;

@@ -132,6 +132,32 @@ function updateActionBar() {
   }
 }
 
+/* The alive counter is the emotional instrument of the whole finale: one number, huge,
+   that holds dead still through the opening casts and then lurches. #tcast/#tCastB/#tCastT
+   have been sitting in the markup since the first build with no JavaScript touching them —
+   this is what they were for. Every cast is named before it lands, which is the difference
+   between "we lost" and "we lost to the Grave Tide at two minutes". */
+let ovLastAlive = -1, ovDeltaT = 0;
+function ovHudBlock() {
+  const O = G.overlord, bar = $('ovbar');
+  if (!bar) return;
+  if (!O) { if (ovLastAlive !== -1) { bar.classList.remove('on'); ovLastAlive = -1; } return; }
+  bar.classList.add('on');
+  // never fmt() this one: "1.00K standing" is not the same sentence as "1001 standing"
+  $('ovCount').textContent = String(O.alive);
+  if (ovLastAlive >= 0 && O.alive < ovLastAlive) {
+    $('ovDelta').textContent = '−' + (ovLastAlive - O.alive);
+    $('ovDelta').classList.add('on'); ovDeltaT = G.t;
+  } else if (G.t - ovDeltaT > 1.5) $('ovDelta').classList.remove('on');
+  ovLastAlive = O.alive;
+  const cb = $('tcast');
+  if (O.cast && O.castT > 0) {
+    cb.classList.add('on');
+    $('tCastT').textContent = O.cast.n.toUpperCase();
+    $('tCastB').style.width = clamp(O.castT / 1.6, 0, 1) * 100 + '%';
+  } else cb.classList.remove('on');
+}
+
 /* ------------------------------ HUD ------------------------------ */
 let hudT = 0;
 function updateHUD(dt) {
@@ -167,8 +193,14 @@ function updateHUD(dt) {
       : durShort(seasonLeft());
   $('season').classList.toggle('final', fin);
   $('season').title = fin
-    ? 'All Ascendant seats claimed — the season ends when this hits zero'
+    ? 'All Ascendant seats claimed — the Overlord rises when this hits zero'
     : 'Season ends 10 minutes after the third adventurer reaches level ' + ASCEND_LEVEL;
+  // once the final call is running, the season chip stops counting down to a reset
+  // and starts counting down to the thing at the end of it
+  if (G.overlord) { $('sLeft').textContent = 'THE OVERLORD'; $('season').classList.add('ovarm'); }
+  else if (fin) { $('sLeft').textContent = 'OVERLORD ' + durShort(seasonLeft()); $('season').classList.add('ovarm'); }
+  else $('season').classList.remove('ovarm');
+  ovHudBlock();
   const hh = Math.floor(G.tod * 24), mm = Math.floor((G.tod * 24 % 1) * 60);
   $('clock').textContent = pad2(hh) + ':' + pad2(mm);
 

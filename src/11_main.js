@@ -52,8 +52,9 @@ function saveGame() {
     const data = {
       v: 1, ts: Date.now(),
       season: { num: SEASON.num, start: SEASON.start, ended: SEASON.ended, champions: SEASON.champions,
-        milestone: SEASON.milestone, ascended: SEASON.ascended },
+        milestone: SEASON.milestone, ascended: SEASON.ascended, ov: SEASON.ov },
       mythic: Array.from(MYTHIC_HOLDERS),
+      eternal: ETERNAL,
       set: SET,
       p: {
         n: p.name, c: p.cls, lv: p.level, xp: p.xp, gold: p.gold,
@@ -81,7 +82,10 @@ function applySave(d) {
   SEASON.num = d.season.num; SEASON.start = d.season.start;
   SEASON.ended = !!d.season.ended; SEASON.champions = d.season.champions || [];
   SEASON.milestone = d.season.milestone || 0; SEASON.ascended = d.season.ascended || [];
+  SEASON.ov = d.season.ov || null;
   MYTHIC_HOLDERS.clear(); (d.mythic || []).forEach(x => MYTHIC_HOLDERS.add(x));
+  // relics are the one thing that outlives a season, so they load from their own key
+  ETERNAL.p = (d.eternal && d.eternal.p) || []; ETERNAL.ai = (d.eternal && d.eternal.ai) || [];
   Object.assign(SET, d.set || {});
   R.quality = SET.quality;
   A.volMusic = SET.volm; A.volSfx = SET.vols;
@@ -108,6 +112,13 @@ function applySave(d) {
 }
 
 /* ------------------------------ OFFLINE ------------------------------ */
+/* metaOffline stops the roster dead at the grace deadline, but playerOffline advanced
+   the player for the FULL absence — so a returning player arrived at their own finale
+   having grown for hours the rest of the world did not get. Clamp both to the same cutoff. */
+function playerOffline0(ms) {
+  const left = seasonLeft();
+  return playerOffline(left > 0 ? Math.min(ms, left) : Math.min(ms, 60000));
+}
 function playerOffline(ms) {
   const p = G.player;
   if (!p.autoOn) return null;
@@ -294,14 +305,16 @@ async function startGame(saved) {
 
     // ---- offline catch-up ----
     const elapsed = Math.max(0, Date.now() - lastTs);
+    let ovDone = [];
     if (saved && elapsed > 20000) {
-      const world = metaOffline(elapsed);
-      const mine = playerOffline(elapsed);
-      showWelcomeBack(elapsed, mine);
+      const mine = playerOffline0(elapsed);
+      ovDone = ovCatchUp(elapsed);
+      showWelcomeBack(elapsed, mine, ovDone);
     }
     chatPush('sys', 'Welcome to Idle Quest. Season ' + SEASON.num + ' ends in ' + dur(seasonLeft()) + '.');
     chatPush('world', POP + ' adventurers are online in ' + DB.zones.length + ' zones.');
-    if (seasonLeft() <= 0) endSeason();
+    if (!ovDone.length && seasonLeft() <= 0) endSeason();
+    ovBootRecover();
     if (G.player.autoOn) setAuto(true);
 
     requestAnimationFrame(loop);
@@ -320,9 +333,52 @@ async function startGame(saved) {
     starting = false;
   }
 }
-function showWelcomeBack(ms, mine) {
+/* Seasons turn over while the tab is shut. Each one resolves its own Overlord
+   synchronously, so a two-day absence can span several finales and you read the
+   whole run of them on return. Bounded, or a month away simulates forever. */
+function ovCatchUp(elapsed) {
+  const done = [];
+  let left = elapsed, guard = 0;
+  while (left > 20000 && guard++ < OV.CATCHUP_MAX) {
+    metaOffline(left);                                  // stops dead at the grace deadline
+    if (seasonLeft() > 0) break;                        // this season has not actually ended
+    const before = SEASON.num;
+    endSeason(true);                                    // resolves the Overlord, quietly
+    done.push({ num: before, ov: SEASON.ov });
+    const span = Math.max(60000, Date.now() - SEASON.start);
+    left -= span;
+    if (left > 20000) { SEASON.start = Date.now() - Math.max(0, left); ovStartNextSeason(); }
+  }
+  return done;
+}
+/* A verdict can exist without ever having been paid or shown — the tab closed between
+   the fight and the screen. Also fixes a shipping soft-lock: SEASON.ended is saved and
+   checkSeason early-returns on it, so a player who closed the tab on the season screen
+   came back to a world with no way forward at all. */
+function ovBootRecover() {
+  const ov = SEASON.ov;
+  if (!ov || ov.n !== SEASON.num) return;
+  if (ov.ph < 3) ovAward();
+  if (ov.ph < 5) { ov.ph = 4; showSeasonEnd(SEASON.champions[0]); }
+}
+function showWelcomeBack(ms, mine, ovDone) {
   let h = '<div class="card center"><b style="color:var(--gold);font-size:15px">WHILE YOU WERE AWAY</b>' +
     '<div class="tiny">' + dur(ms) + ' of world time passed. The other ' + POP + ' adventurers never stopped.</div></div>';
+  if (ovDone && ovDone.length) {
+    h += '<h4 class="sec">' + (ovDone.length === 1 ? 'The season turned over' :
+      ovDone.length + ' seasons turned over') + '</h4>';
+    for (const d of ovDone) {
+      const o = d.ov; if (!o) continue;
+      h += '<div class="row"><span class="k">Season ' + d.num + '</span><b style="color:' +
+        (o.outcome === 2 ? '#7ff2ff' : o.outcome === 1 ? '#d0a0ff' : '#ff5a72') + '">' +
+        (o.outcome === 2 ? 'THE WORLD HELD \u00b7 ' + o.alive + ' stood'
+          : o.outcome === 1 ? 'A HOLLOW VICTORY' : 'THE WORLD FELL') + '</b></div>';
+      if (o.outcome === 2) h += '<div class="row"><span class="k" style="padding-left:12px">you</span><b style="color:' +
+        (o.pAlive ? '#7ff2ff' : '#8f98a9') + '">' + (o.pAlive ? 'SURVIVED' : 'fell at ' + ovClock(Math.max(0, o.pDeath))) + '</b></div>';
+    }
+    if (ETERNAL.p.length) h += '<div class="row"><span class="k">You carry</span><b class="q6">' +
+      ETERNAL.p.map(i => esc(i.n)).join(', ') + '</b></div>';
+  }
   if (mine && (mine.lv > 0 || mine.gold > 0)) {
     h += '<h4 class="sec">Your idle progress</h4>' +
       '<div class="row"><span class="k">Levels gained</span><b>+' + mine.lv + '</b></div>' +
@@ -394,6 +450,7 @@ function loop(ts) {
     INPUT.jump = false;
     updateWorld(dt);
     raidTick(dt);
+    ovReplayTick(dt);
     metaTick(dt);
     updateParticles(dt);
     autoSampleT -= dt;

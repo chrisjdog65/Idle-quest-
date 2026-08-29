@@ -56,6 +56,21 @@ const AUTO = {
     if (!p.autoOn || p.dead) { if (p.dead) { this.actLabel = 'Reviving…'; INPUT.mx = INPUT.mz = 0; } return; }
     this.t += dt;
 
+    /* ---- the Overlord overrides everything ----
+       Returning here, above the raid short-circuit, skips in one move: a raid the player
+       was mid-way through when the season ended; the disengage watchdog, which blacklists
+       any mob still above 55% health the moment the player drops below 30% and would make
+       the agent flee and never come back; pickFoe's refusals, which reject any boss more
+       than +2 levels up or with a time-to-kill over 150 s, both of which a boss with a
+       hundred million health fails; and chooseGoal, which would overwrite this every 3.5 s. */
+    if (G.overlord && G.overlord.boss && !p.ovDown) {
+      this.act = 'overlord'; this.actLabel = 'THE OVERLORD';
+      this.goal = null; this.goalName = null; this.goalKind = '';
+      G.target = G.overlord.boss;
+      this.fight(dt, p, G.overlord.boss);
+      return;
+    }
+
     /* ---- housekeeping: gear, junk, quests, clan ---- */
     this.houseT -= dt;
     if (this.houseT <= 0) {

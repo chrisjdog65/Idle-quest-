@@ -381,6 +381,16 @@ const PANEL_RENDER = {
       '<div class="card center"><b>' + SEASON.champions.length + '</b><div class="tiny">seasons recorded</div></div>' +
       '<div class="card center"><b>' + wins.lv + ' / ' + wins.gs + '</b><div class="tiny">your level / gear crowns</div></div>' +
       '<div class="card center"><b>' + wins.guild + '</b><div class="tiny">your clan crowns</div></div></div>';
+    const ovs = SEASON.champions.filter(c => c.ov);
+    if (ovs.length) {
+      const held = ovs.filter(c => c.ov.outcome === 2).length, lived = ovs.filter(c => c.ov.pAlive).length;
+      h += '<div class="grid g3" style="margin:6px 0">' +
+        '<div class="card center" style="border-color:#7ff2ff"><b class="q6">' + held + ' / ' + ovs.length +
+        '</b><div class="tiny">Overlords felled</div></div>' +
+        '<div class="card center"><b>' + lived + '</b><div class="tiny">times you survived</div></div>' +
+        '<div class="card center"><b class="q6">' + (ETERNAL.p.length + ETERNAL.ai.length) +
+        '</b><div class="tiny">relics in the world</div></div></div>';
+    }
     for (const c of SEASON.champions) {
       const gc = c.gearChamp || c.champ;
       h += '<div class="card" style="margin-bottom:6px;border-color:var(--gold)">' +
@@ -397,6 +407,12 @@ const PANEL_RENDER = {
       }
       h += '<div class="row"><span class="k">Crowned Clan</span><b>' + esc(c.guild ? c.guild.n : '—') +
         (c.guild && c.guild.isPlayerGuild ? ' (yours)' : '') + (c.guild ? ' · ' + fmt(c.guild.respect) + ' respect' : '') + '</b></div>';
+      // seasons archived before the Overlord existed have no c.ov, so guard it
+      if (c.ov) h += '<div class="row"><span class="k">The Overlord</span><b style="color:' +
+        (c.ov.outcome === 2 ? '#7ff2ff' : c.ov.outcome === 1 ? '#d0a0ff' : '#ff5a72') + '">' +
+        (c.ov.outcome === 2 ? 'HELD \u00b7 ' + c.ov.alive + ' stood'
+          : c.ov.outcome === 1 ? 'HOLLOW VICTORY' : 'FELL \u00b7 boss at ' + Math.round(c.ov.bossLeft * 100) + '%') +
+        (c.ov.pAlive ? ' \u00b7 you lived' : '') + '</b></div>';
       if (c.ascended && c.ascended.length) {
         h += '<div class="row"><span class="k">Ascendants</span><b class="q5">' +
           c.ascended.map(a => esc(a.n) + (a.isPlayer ? ' (you)' : '')).join(', ') + '</b></div>';
@@ -679,6 +695,56 @@ function openModal(title, html) {
 }
 
 /* ------------------------------ SEASON END SCREEN ------------------------------ */
+/* The Overlord's account of itself, prepended above the crowns. The cast log is the
+   "why we lost" a player will screenshot, and the portent line is the honest statement
+   of the odds: it is literally how many of the augury runs beat the health it was given. */
+function ovResultHTML(rec) {
+  const ov = SEASON.ov;
+  if (!ov || ov.n !== rec.num) return '';
+  const win = ov.outcome === 2, pyr = ov.outcome === 1;
+  const col = win ? '#7ff2ff' : pyr ? '#d0a0ff' : '#ff5a72';
+  let h = '<div class="champ" style="border-color:' + col + ';box-shadow:0 0 44px ' + col + '33">' +
+    '<div class="tiny" style="letter-spacing:.3em;color:' + col + '">THE OVERLORD — KAARNATHUL, THE UNMADE</div>' +
+    '<div class="cn" style="color:' + col + '">' +
+    (win ? 'THE WORLD HELD' : pyr ? 'A HOLLOW VICTORY' : 'THE WORLD HAS FALLEN') + '</div>' +
+    '<div class="tiny" style="color:#c9bda0;margin-top:4px">' +
+    (win ? ov.alive + ' of ' + (POP + 1) + ' were still standing when it fell'
+      : pyr ? 'It died. Every last one of you died with it. Nothing is carried.'
+        : 'It finished the fight at ' + Math.round(ov.bossLeft * 100) + '% health. Nothing is carried.') +
+    '</div>' +
+    '<div class="tiny" style="color:#8f98a9;margin-top:6px">Level ' + ov.lvl + ' · ' +
+    fmt(ov.bossHP) + ' health against ' + fmt(ov.d0) + ' raid damage per second · ' + ovClock(ov.dur) + '</div>';
+  h += '<div class="tiny" style="color:#c9a6e8;margin-top:8px;font-style:italic">The augurs cast the battle ' +
+    ov.dry + ' ways. In ' + ov.omens + ' of them, the Overlord fell.</div>';
+  h += '<div class="tiny" style="margin-top:8px;color:' + (ov.pAlive ? '#7ff2ff' : '#ff8a9a') + ';font-weight:700">' +
+    (ov.pAlive ? 'YOU WERE ONE OF THE SURVIVORS'
+      : ov.pDeath >= 0 ? 'You fell at ' + ovClock(ov.pDeath) : 'You did not walk away') + '</div></div>';
+  if (ov.log && ov.log.length) {
+    h += '<div style="max-width:460px;margin:12px auto"><h4 class="sec">What It Cast</h4>' +
+      ov.log.map(c => '<div class="row"><span class="k">' + ovClock(c.t) + ' · ' + esc(c.n) + '</span>' +
+        '<b style="color:' + (c.dead > 100 ? '#ff5a72' : c.dead > 0 ? '#e0b070' : '#8f98a9') + '">' +
+        (c.dead > 0 ? '−' + fmt(c.dead) : '—') + '</b></div>').join('') + '</div>';
+  }
+  if (win && ETERNAL.p.length) {
+    const it = ETERNAL.p[ETERNAL.p.length - 1];
+    h += '<div style="max-width:460px;margin:12px auto"><h4 class="sec">What You Carried Out</h4>' +
+      '<div class="card" style="border-color:#7ff2ff"><b class="q6">' + esc(it.n) + '</b>' +
+      '<div class="tiny" style="color:#c9bda0">' + RARITY[ETERNAL_TIER].n + ' ' + esc(SLOT_BY[it.sl].n) +
+      ' · item level ' + it.il + '</div>' +
+      (it.fl ? '<div class="tiny" style="font-style:italic;color:#8fb8c8;margin-top:3px">' + esc(it.fl) + '</div>' : '') +
+      '<div class="tiny" style="margin-top:6px;color:#7ff2ff">This is yours. It follows you into Season ' + (rec.num + 1) + '.</div>' +
+      '</div></div>';
+  }
+  return h;
+}
+/* The only call site of startNewSeason used to be a click handler, so an unattended world
+   reached this screen and stopped there forever. Both paths go through here now. */
+function ovStartNextSeason() {
+  const box = $('seasonend');
+  if (box) box.classList.remove('on');
+  if (SEASON.ov) SEASON.ov.ph = 5;
+  startNewSeason();
+}
 function showSeasonEnd(rec) {
   const box = $('seasonend');
   const crown = (title, c, sub) => c ? (
@@ -695,6 +761,8 @@ function showSeasonEnd(rec) {
     (rec.ascended && rec.ascended.length >= MYTHIC_LIMIT
       ? 'All ' + MYTHIC_LIMIT + ' Ascendant seats were claimed \u00b7 the final ten minutes are over'
       : 'The world resets \u00b7 champions are crowned') + '</div>';
+
+  h += ovResultHTML(rec);
 
   if (rec.sweep) {
     h += crown('IDLE QUEST CHAMPION \u2014 LEVEL &amp; GEAR', rec.champ,
@@ -733,6 +801,6 @@ function showSeasonEnd(rec) {
     ' is now permanently recorded in the Hall of Fame</div>';
   box.innerHTML = h;
   box.classList.add('on');
-  $('newseason').onclick = () => { box.classList.remove('on'); startNewSeason(); sfx('levelup', 1); };
+  $('newseason').onclick = () => { ovStartNextSeason(); sfx('levelup', 1); };
   sfx('levelup', 1);
 }
