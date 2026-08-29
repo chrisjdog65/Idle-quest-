@@ -261,8 +261,11 @@ function buildPartMesh() {
 }
 function spawnPart(x, y, z, vx, vy, vz, life, size, r, g, b, a, kind, grav, spin) {
   let i = PART.n;
-  if (i >= PART.cap) {                       // recycle the oldest
-    i = (R.frame * 7) % PART.cap;
+  if (i >= PART.cap) {
+    // rotate through every slot: the old (frame*7) % cap could only ever touch
+    // the 200 slots divisible by 7, so a full pool froze most particles solid
+    PART.cur = ((PART.cur || 0) + 1) % PART.cap;
+    i = PART.cur;
   } else PART.n++;
   PART.px[i] = x; PART.py[i] = y; PART.pz[i] = z;
   PART.vx[i] = vx; PART.vy[i] = vy; PART.vz[i] = vz;
@@ -704,7 +707,9 @@ function drawBuilding(b, px, pz, night) {
   if (!close) return;
   for (const pr of b.props) {
     bldWorld(b, pr.x, pr.z, _bp);
-    M4.trs(_m, _bp[0], gy + pr.y, _bp[1], 0, b.rot + pr.r, 0, pr.sx, pr.sy, pr.sz);
+    // meshCylinder is base-anchored (y spans 0..1); boxes and spheres are centred.
+    // placing cylinders with the centred convention floated them half their height.
+    M4.trs(_m, _bp[0], gy + pr.y - (pr.m === 'cyl' ? pr.sy / 2 : 0), _bp[1], 0, b.rot + pr.r, 0, pr.sx, pr.sy, pr.sz);
     const mesh = pr.m === 'sph' ? M.sph : pr.m === 'cyl' ? M.cyl : M.box;
     pushInst(mesh, _m, pr.c[0], pr.c[1], pr.c[2], pr.e + (pr.e ? 0 : lit), 0, .9);
   }
@@ -715,7 +720,7 @@ function drawBuilding(b, px, pz, night) {
     pushInst(M.sph, _m, 1.0, .86, .52, 2.0, 0, .2);
   }
   // hearth embers
-  if (b.fire && (R.frame % 4 === 0) && d2 < 60 * 60) {
+  if (b.fire && Math.random() < G.dt * 15 && d2 < 60 * 60) {
     bldWorld(b, b.fire.x, b.fire.z, _bp);
     const cold = b.fire.cold;
     spawnPart(_bp[0] + (Math.random() - .5) * .35, gy + b.fire.y + .3, _bp[1] + (Math.random() - .5) * .35,
@@ -741,12 +746,12 @@ function drawTowns(px, pz, viewDist) {
       const a = i / 3 * TAU + .5, r = 13;
       const bx = hub.x + Math.cos(a) * r, bz = hub.z + Math.sin(a) * r;
       const by = groundH(bx, bz);
-      M4.trs(_m, bx, by + .8, bz, 0, 0, 0, .5, 1.6, .5);
+      M4.trs(_m, bx, by, bz, 0, 0, 0, .5, 1.6, .5);
       pushInst(M.cyl, _m, .24, .21, .18, 0, 0, .95);
       const fl = .7 + Math.sin(R.time * 6 + i) * .3;
       M4.trs(_m, bx, by + 1.8, bz, 0, 0, 0, .8, .8, .8);
       pushInst(M.sph, _m, 1.0, .55, .18, 1.4 * fl, 0, .2);
-      if ((R.frame + i * 7) % 5 === 0 && V.dist2(px, pz, bx, bz) < 120 * 120)
+      if (Math.random() < G.dt * 12 && V.dist2(px, pz, bx, bz) < 120 * 120)
         spawnPart(bx + (Math.random() - .5) * .4, by + 2.0, bz + (Math.random() - .5) * .4,
           0, 1.4 + Math.random(), 0, .9, .22, 1, .55, .2, .9, 0, .6, 0);
     }
@@ -777,7 +782,7 @@ function drawPOIMarkers(px, pz, viewDist) {
     const pulse = .6 + Math.sin(R.time * 2 + p.raid) * .35;
     M4.trs(_m, p.x, gy + 3, p.z, 0, 0, 0, 4.4, 5.4, .3);
     pushInst(M.rbox, _m, .45, .25, .85, pulse, 0, .2, 1);
-    if ((R.frame + p.raid) % 4 === 0)
+    if (Math.random() < G.dt * 15)
       spawnPart(p.x + (Math.random() - .5) * 4, gy + Math.random() * 5, p.z + (Math.random() - .5) * .6,
         0, .7, 0, 1.2, .3, .6, .35, 1, .8, 0, .2, 0);
   }

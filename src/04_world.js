@@ -367,10 +367,12 @@ function buildPOI() {
       POI.camps.push({ k: 'camp', n: rng.pick(z.mobs) + ' Camp', x: cx, z: cz, zone: z.id, r: 26, fam: rng.i(6) });
     }
     // ruins / landmarks for flavour + explore quests
+    const ruinNames = zoneRuinNames(z.id);
     for (let i = 0; i < 4; i++) {
       const a = rng.f() * TAU, rad = rng.r(z.r * .3, z.r * .9);
+      rng.f();   // keeps the draw count of the old rng.pick, so the rest of the layout is unchanged
       POI.ruins.push({
-        k: 'ruin', n: rng.pick(Q_PLACES), x: z.cx + Math.cos(a) * rad, z: z.cz + Math.sin(a) * rad,
+        k: 'ruin', n: ruinNames[i], x: z.cx + Math.cos(a) * rad, z: z.cz + Math.sin(a) * rad,
         zone: z.id, r: 16, kind: rng.i(3)
       });
     }
@@ -389,8 +391,10 @@ function buildPOI() {
       const h = groundHRaw(p.x, p.z);
       if (h > WATER_Y + 1.6 && slopeRaw(p.x, p.z) < .42) { p.y = h; break; }
       p.x += rng.r(-30, 30); p.z += rng.r(-30, 30);
-      p.x = clamp(p.x, -WORLD_HALF + 30, WORLD_HALF - 30);
-      p.z = clamp(p.z, -WORLD_HALF + 30, WORLD_HALF - 30);
+      // the continent shelf ends at 0.8 * WORLD_HALF; the old clamp let the random
+      // walk carry a POI out into open ocean and strand it there
+      p.x = clamp(p.x, -WORLD_HALF * .8 + 20, WORLD_HALF * .8 - 20);
+      p.z = clamp(p.z, -WORLD_HALF * .8 + 20, WORLD_HALF * .8 - 20);
       p.y = groundHRaw(p.x, p.z);
     }
   }
@@ -470,6 +474,11 @@ function getChunkProps(cx, cz) {
     const h = groundH(x, z);
     if (h < WATER_Y - 1.5) continue;
     if (roadDist(x, z) < 5) continue;
+    // the tree loop always rejected town flats; rocks did not, so boulders sat on
+    // plazas and inside buildings -- the big ones with collision, blocking doorways
+    let rskip = false;
+    for (const f of FLATS) { if (Math.hypot(x - f.x, z - f.z) < f.r * .8) { rskip = true; break; } }
+    if (rskip) continue;
     const s = rng.r(.5, 2.4);
     rocks.push({ x, y: h, z, s, r: rng.f() * TAU, rad: s * 0.9, sq: rng.r(.6, 1.3) });
   }
@@ -478,6 +487,10 @@ function getChunkProps(cx, cz) {
     const x = ox + rng.f() * CHUNK, z = oz + rng.f() * CHUNK;
     const h = groundH(x, z);
     if (h < WATER_Y + .6 || slopeAt(x, z) > .5) continue;
+    if (roadDist(x, z) < 5) continue;
+    let bskip = false;
+    for (const f of FLATS) { if (Math.hypot(x - f.x, z - f.z) < f.r * .8) { bskip = true; break; } }
+    if (bskip) continue;
     bushes.push({ x, y: h, z, s: rng.r(.5, 1.3), r: rng.f() * TAU, k: rng.i(2) });
   }
   c = { trees, rocks, bushes, cx, cz };

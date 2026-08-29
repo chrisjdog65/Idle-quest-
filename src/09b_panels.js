@@ -79,7 +79,7 @@ const PANEL_RENDER = {
     ['Items Found', st.itemsFound], ['Gold Earned', fmt(st.goldEarned)], ['Distance Travelled', fmt(st.distance) + ' m'],
     ['Time Played', dur(p.playtime * 1000)], ['Seasons Played', (st.seasons || 0) + 1]];
     for (const [k, v] of rows) h += '<div class="row"><span class="k">' + k + '</span><b>' + v + '</b></div>';
-    const hof = hallOfFame(1000);
+    const hof = hallOfFame(POP + 1);
     const rank = hof.findIndex(r => r.isPlayer) + 1;
     h += '<h4 class="sec">Standing</h4><div class="card center"><div style="font-size:26px;font-weight:900;color:var(--gold)">#' + rank + '</div>' +
       '<div class="tiny">of ' + (POP + 1) + ' adventurers this season</div></div>';
@@ -104,7 +104,7 @@ const PANEL_RENDER = {
         '<div class="btn sm" data-act="selljunk">💰 Sell Junk</div></div>';
       if (!p.bags.length) return h + '<div class="tiny center" style="padding:26px">Your bags are empty. Go kill something.</div>';
       h += '<div class="slotgrid">';
-      p.bags.forEach((it, i) => { h += cellHTML(it, 'bag', i, 'data-act="bagclick" data-v="' + i + '"'); });
+      p.bags.forEach((it, i) => { h += cellHTML(it, 'bag', i, 'data-act="bagclick" data-v="' + it.u + '"'); });
       h += '</div><div class="tiny center" style="margin-top:8px">Tap an item to equip it. Hold to inspect.</div>';
       h += '<h4 class="sec">Bag Contents</h4>';
       p.bags.forEach((it, i) => {
@@ -113,8 +113,8 @@ const PANEL_RENDER = {
         h += '<div class="eqrow">' + cellHTML(it, 'bag', i) + '<div class="info"><div class="n q' + it.t + '">' + esc(it.n) + '</div>' +
           '<div class="s">' + SLOT_BY[it.sl].n + ' · ilvl ' + it.il + ' · <span style="color:' + (d >= 0 ? '#4ad24a' : '#e0492f') + '">' +
           (d >= 0 ? '+' : '') + fmt(d) + '</span></div></div>' +
-          '<div class="btn sm gold" data-act="equip" data-v="' + i + '">Equip</div>' +
-          '<div class="btn sm" data-act="sell" data-v="' + i + '">' + fmt(it.val) + 'g</div></div>';
+          '<div class="btn sm gold" data-act="equip" data-v="' + it.u + '">Equip</div>' +
+          '<div class="btn sm" data-act="sell" data-v="' + it.u + '">' + fmt(it.val) + 'g</div></div>';
       });
       return h;
     }
@@ -127,7 +127,7 @@ const PANEL_RENDER = {
         const d = it.sc - (cur ? cur.sc : 0);
         h += '<div class="eqrow">' + cellHTML(it, 'trade', i) + '<div class="info"><div class="n q' + it.t + '">' + esc(it.n) + '</div>' +
           '<div class="s">' + esc(o.seller) + ' · ilvl ' + it.il + ' · <span style="color:' + (d >= 0 ? '#4ad24a' : '#e0492f') + '">' + (d >= 0 ? '+' : '') + fmt(d) + '</span></div></div>' +
-          '<div class="btn sm ' + (G.player.gold >= o.price ? 'gold' : 'dis') + '" data-act="buy" data-v="' + i + '">' + fmt(o.price) + 'g</div></div>';
+          '<div class="btn sm ' + (G.player.gold >= o.price ? 'gold' : 'dis') + '" data-act="buy" data-v="' + o.id + '">' + fmt(o.price) + 'g</div></div>';
       });
       return h;
     }
@@ -148,7 +148,7 @@ const PANEL_RENDER = {
     p.bags.forEach((it, i) => {
       h += '<div class="eqrow">' + cellHTML(it, 'bag', i) + '<div class="info"><div class="n q' + it.t + '">' + esc(it.n) + '</div>' +
         '<div class="s">' + SLOT_BY[it.sl].n + ' · ilvl ' + it.il + '</div></div>' +
-        '<div class="btn sm grn" data-act="board" data-v="' + i + '">List ' + fmt(Math.round(it.val * 1.25)) + 'g</div></div>';
+        '<div class="btn sm grn" data-act="board" data-v="' + it.u + '">List ' + fmt(Math.round(it.val * 1.25)) + 'g</div></div>';
     });
     return h;
   },
@@ -523,7 +523,7 @@ const PANEL_RENDER = {
       '<div class="row"><span class="k">Level cap</span><b>none</b></div>' +
       '<div class="row"><span class="k">Item cap</span><b>none</b></div>' +
       '<div class="row"><span class="k">Season length</span><b>7 real days</b></div>' +
-      '<div class="row"><span class="k">World size</span><b>' + (WORLD_SIZE / 1000).toFixed(1) + ' km²</b></div>' +
+      '<div class="row"><span class="k">World size</span><b>' + ((WORLD_SIZE / 1000) ** 2).toFixed(1) + ' km² (' + (WORLD_SIZE / 1000).toFixed(1) + ' km across)</b></div>' +
       '<h4 class="sec">Controls</h4>' +
       '<div class="tiny">Left half of the screen: move (push to the edge to sprint). Right half: swipe to look, pinch to zoom, tap an enemy to target. ' +
       'Buttons bottom-right are your abilities. On a keyboard: WASD, Space, 1–6, Tab to target, F for auto.</div>';
@@ -534,21 +534,26 @@ const PANEL_RENDER = {
 function PANEL_ACT(a, v, node) {
   const p = G.player;
   switch (a) {
-    case 'equip': equipItem(p, +v); uiDirty.bag = 1; renderPanel(); break;
-    case 'bagclick': equipItem(p, +v); renderPanel(); break;
+    case 'equip': { const bi = p.bags.findIndex(b => b.u === +v); if (bi >= 0) equipItem(p, bi); uiDirty.bag = 1; renderPanel(); break; }
+    case 'bagclick': { const bi = p.bags.findIndex(b => b.u === +v); if (bi >= 0) equipItem(p, bi); renderPanel(); break; }
     case 'unequip': {
       const it = p.gear[v];
-      if (it) { delete p.gear[v]; p.bags.push(it); p.st = calcStats(p); styleFromGear(p, p.gear, p.cls); sfx('ui', .7); }
+      if (it) {
+        delete p.gear[v]; p.bags.push(it);
+        p.st = calcStats(p); p.resMax = resourceMax(p);
+        p.hp = Math.min(p.hp, p.st.hpMax); p.res = Math.min(p.res, p.resMax);
+        styleFromGear(p, p.gear, p.cls); sfx('ui', .7);
+      }
       renderPanel(); break;
     }
     case 'sell': {
-      const it = p.bags[+v];
-      if (it) { p.bags.splice(+v, 1); giveGold(p, it.val); sfx('coin', .9); }
+      const bi = p.bags.findIndex(b => b.u === +v);
+      if (bi >= 0) { const it = p.bags[bi]; p.bags.splice(bi, 1); giveGold(p, it.val); sfx('coin', .9); }
       renderPanel(); break;
     }
-    case 'board': sellToBoard(+v); renderPanel(); break;
+    case 'board': { const bi = p.bags.findIndex(b => b.u === +v); if (bi >= 0) sellToBoard(bi); renderPanel(); break; }
     case 'offer': acceptOffer(+v); renderPanel(); break;
-    case 'buy': buyTrade(+v); renderPanel(); break;
+    case 'buy': { const ti = TRADE_BOARD.findIndex(x => x.id === +v); if (ti >= 0) buyTrade(ti); renderPanel(); break; }
     case 'equipbest': { const n = autoEquipBest(p); toast(n ? 'Equipped ' + n + ' upgrade' + (n > 1 ? 's' : '') : 'Nothing better in your bags.', 'sys'); renderPanel(); break; }
     case 'selljunk': { const r = sellJunk(p); toast(r.n ? 'Sold ' + r.n + ' items for ' + fmt(r.g) + 'g' : 'No junk to sell.', 'sys'); renderPanel(); break; }
     case 'accept': acceptQuest(p, +v); renderPanel(); break;
@@ -569,7 +574,7 @@ function PANEL_ACT(a, v, node) {
     case 'quality': R.quality = +v; applyQuality(); renderPanel(); break;
     case 'rscale': SET.rscale = +v / 100; onResize(); renderPanel(); break;
     case 'save': saveGame(); toast('Saved.', 'sys'); break;
-    case 'wipe': if (confirm('Delete your save and start a fresh season?')) { localStorage.removeItem(SAVE_KEY); location.reload(); } break;
+    case 'wipe': if (confirm('Delete your save and start a fresh season?')) { G.wiping = 1; localStorage.removeItem(SAVE_KEY); location.reload(); } break;
     case 'givegold': {
       const [ri, raw] = v.split(':');
       const rec = ROSTER[+ri]; if (!rec) break;
@@ -578,9 +583,11 @@ function PANEL_ACT(a, v, node) {
       break;
     }
     case 'giveitem': {
-      const [ri, bi] = v.split(':');
+      const [ri, iu] = v.split(':');
       const rec = ROSTER[+ri]; if (!rec) break;
-      sendItem(rec, +bi); showAIInspect(rec);
+      const bi = p.bags.findIndex(b => b.u === +iu);
+      if (bi >= 0) sendItem(rec, bi);
+      showAIInspect(rec);
       break;
     }
     case 'askgold': { const rec = ROSTER[+v]; if (rec) { askForGold(rec); showAIInspect(rec); } break; }
@@ -604,7 +611,7 @@ function showAIInspect(rec) {
   if (!rec) return;
   const g = rec.g >= 0 && GUILDS[rec.g] ? GUILDS[rec.g] : null;
   const cls = CLASS_BY[rec.c];
-  const hof = hallOfFame(1000);
+  const hof = hallOfFame(POP + 1);
   const rank = hof.findIndex(r => r.i === rec.i) + 1;
   let h = '<div class="card"><div style="display:flex;gap:10px;align-items:center">' +
     '<div style="font-size:32px">' + cls.ic + '</div><div style="flex:1">' +
@@ -649,7 +656,7 @@ function showAIInspect(rec) {
     p.bags.forEach((it, i) => {
       h += '<div class="eqrow">' + cellHTML(it, 'bag', i) + '<div class="info"><div class="n q' + it.t + '">' + esc(it.n) + '</div>' +
         '<div class="s">' + SLOT_BY[it.sl].n + ' · ilvl ' + it.il + ' · worth ' + fmt(it.val) + 'g</div></div>' +
-        '<div class="btn sm grn" data-act="giveitem" data-v="' + rec.i + ':' + i + '">Send</div></div>';
+        '<div class="btn sm grn" data-act="giveitem" data-v="' + rec.i + ':' + it.u + '">Send</div></div>';
     });
   }
   if (g) h += '<h4 class="sec">Clan</h4><div class="card click" data-act="guildinfo" data-v="' + g.i + '"><b style="color:' + g.col + '">' + esc(g.n) + '</b><div class="tiny">"' + esc(g.motto) + '" · ' + g.members.length + ' members · ' + fmt(Math.round(g.respect)) + ' respect</div></div>';
@@ -684,10 +691,13 @@ function showGuildInspect(gi) {
 }
 function openModal(title, html) {
   PANEL = PANEL || 'hof';
+  PANEL_MODAL = true;
   $('panel').classList.add('on');
   $('ptitle').textContent = title;
   $('ptabs').innerHTML = '<div class="tab on" data-act="back">‹ Back</div>';
-  $('ptabs').firstChild.onclick = () => { sfx('ui', .6); panelOpen2(); };
+  /* Back used to call panelOpen2, which never rebuilds def.tabs -- the panel came back
+     with only the Back chip and no way to change tabs. Reopen properly instead. */
+  $('ptabs').firstChild.onclick = () => { sfx('ui', .6); PANEL_MODAL = false; const back = PANEL; PANEL = null; panelOpen(back); };
   $('pbody').innerHTML = html;
   $('pbody').scrollTop = 0;
   bindPanelActions($('pbody'));
@@ -725,7 +735,7 @@ function ovResultHTML(rec) {
         '<b style="color:' + (c.dead > 100 ? '#ff5a72' : c.dead > 0 ? '#e0b070' : '#8f98a9') + '">' +
         (c.dead > 0 ? '−' + fmt(c.dead) : '—') + '</b></div>').join('') + '</div>';
   }
-  if (win && ETERNAL.p.length) {
+  if (win && ov.pAlive && ETERNAL.p.length) {
     const it = ETERNAL.p[ETERNAL.p.length - 1];
     h += '<div style="max-width:460px;margin:12px auto"><h4 class="sec">What You Carried Out</h4>' +
       '<div class="card" style="border-color:#7ff2ff"><b class="q6">' + esc(it.n) + '</b>' +

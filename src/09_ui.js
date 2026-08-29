@@ -102,12 +102,16 @@ function buildActionBar() {
     b.dataset.i = i;
     const fire = e => {
       e.preventDefault(); e.stopPropagation();
+      // read G.player at fire time: startNewSeason replaces the object, and this bar
+      // is only ever built once at boot -- the closure kept casting for a ghost
+      const pl = G.player;
+      if (pl.dead) return;
       if (!G.target || G.target.dead) {
-        const t = pickTarget(p, ab.rng > 6 ? ab.rng : 34);
+        const t = pickTarget(pl, ab.rng > 6 ? ab.rng : 34);
         if (t) G.target = t;
       }
-      castAbility(p, ab, G.target);
-      p.autoOn && setAuto(false);
+      castAbility(pl, ab, G.target);
+      pl.autoOn && setAuto(false);
     };
     b.addEventListener('touchstart', fire, { passive: false });
     b.addEventListener('mousedown', fire);
@@ -507,7 +511,7 @@ function drawMinimap(dt) {
     g.beginPath(); g.arc(clamp(m[0], 4, S - 4), clamp(m[1], 4, S - 4), 5, 0, TAU); g.stroke();
   }
   // player arrow
-  g.save(); g.translate(half, half); g.rotate(-G.camYaw);
+  g.save(); g.translate(half, half); g.rotate(PI - G.camYaw);   // -yaw alone points the arrow 180deg the wrong way
   g.fillStyle = '#fff'; g.strokeStyle = '#000'; g.lineWidth = 1;
   g.beginPath(); g.moveTo(0, -6); g.lineTo(4.4, 5); g.lineTo(0, 2.6); g.lineTo(-4.4, 5); g.closePath();
   g.fill(); g.stroke();
@@ -530,7 +534,7 @@ function setupInput() {
     const r = stickRect();
     // re-centre the stick under the finger for comfort
     if (Math.hypot(x - (r.left + r.width / 2), y - (r.top + r.height / 2)) > r.width * .6) {
-      stick.style.left = (x - r.width / 2 - (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sal')) || 0)) + 'px';
+      stick.style.left = (x - r.width / 2) + 'px';
       stick.style.bottom = 'auto';
       stick.style.top = (y - r.height / 2) + 'px';
     }
@@ -594,7 +598,7 @@ function setupInput() {
     if (e.touches.length === 2) {
       pinchD = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
     }
-    if (e.target && e.target.closest && !e.target.closest('#panel,#boot,#seasonend,input')) e.preventDefault();
+    if (e.target && e.target.closest && !e.target.closest('#panel,#boot,#seasonend,#interact,input')) e.preventDefault();
   }, { passive: false });
   cv.addEventListener('touchmove', e => {
     for (const t of e.changedTouches) onMove(t.identifier, t.clientX, t.clientY);
@@ -603,7 +607,7 @@ function setupInput() {
       if (pinchD) G.camDist = clamp(G.camDist * (pinchD / d), 3.2, 20);
       pinchD = d;
     }
-    if (e.target && e.target.closest && !e.target.closest('#panel,#boot,#seasonend,input')) e.preventDefault();
+    if (e.target && e.target.closest && !e.target.closest('#panel,#boot,#seasonend,#interact,input')) e.preventDefault();
   }, { passive: false });
   const upH = e => { for (const t of e.changedTouches) onUp(t.identifier, t.clientX, t.clientY); pinchD = 0; };
   cv.addEventListener('touchend', upH, { passive: true });
@@ -623,7 +627,7 @@ function setupInput() {
     if (e.code === 'Space') { INPUT.jump = true; e.preventDefault(); }
     if (e.code === 'Tab') { G.target = pickTarget(G.player, 40); e.preventDefault(); }
     if (e.code === 'KeyF') { setAuto(!G.player.autoOn); }
-    if (e.code.startsWith('Digit')) {
+    if (e.code.startsWith('Digit') && !G.player.dead) {
       const i = parseInt(e.code.slice(5)) - 1;
       const c = CLASS_BY[G.player.cls];
       if (c.ab[i]) { if (!G.target || G.target.dead) G.target = pickTarget(G.player, 34); castAbility(G.player, c.ab[i], G.target); }
@@ -676,7 +680,7 @@ function setAuto(on) {
 }
 
 /* ------------------------------ PANELS ------------------------------ */
-let PANEL = null, PANEL_TAB = {};
+let PANEL = null, PANEL_TAB = {}, PANEL_MODAL = false;
 const PANEL_DEF = {
   char: { t: 'Character', tabs: ['Gear', 'Stats', 'Season'] },
   bag: { t: 'Inventory', tabs: ['Bags', 'Trade Post', 'Sell'] },
@@ -711,18 +715,20 @@ function panelOpen2() {
   renderPanel();
 }
 function panelClose() {
-  PANEL = null;
+  PANEL = null; PANEL_MODAL = false;
   $('panel').classList.remove('on');
   document.querySelectorAll('#bar .mb').forEach(b => b.classList.remove('on'));
   hideTip();
 }
 function renderPanel() {
   if (!PANEL) return;
+  if (PANEL_MODAL) return;   // an open inspect sheet was being overwritten by delayed reply callbacks
   const body = $('pbody');
   const tab = PANEL_TAB[PANEL] || 0;
-  body.scrollTop = body.scrollTop;
+  const keep = body.scrollTop;
   body.innerHTML = PANEL_RENDER[PANEL] ? PANEL_RENDER[PANEL](tab) : '';
   bindPanelActions(body);
+  body.scrollTop = keep;   // the loop re-renders open panels; losing your place twice a second reads as a broken screen
 }
 function bindPanelActions(root) {
   root.querySelectorAll('[data-act]').forEach(e => {

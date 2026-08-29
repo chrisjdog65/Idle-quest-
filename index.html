@@ -449,7 +449,7 @@ class RNG {
   pick(arr) { return arr[(this._f() * arr.length) | 0]; }
   chance(p) { return this._f() < p; }
   /** Box-Muller-ish cheap gaussian, mean 0 sd 1 */
-  g() { return (this._f() + this._f() + this._f() + this._f() + this._f() + this._f() - 3) * 0.7071; }
+  g() { return (this._f() + this._f() + this._f() + this._f() + this._f() + this._f() - 3) * 1.4142; }
   shuffle(arr) { for (let i = arr.length - 1; i > 0; i--) { const j = (this._f() * (i + 1)) | 0; const t = arr[i]; arr[i] = arr[j]; arr[j] = t; } return arr; }
   /** weighted pick: weights array of numbers */
   wpick(items, weights) {
@@ -598,7 +598,10 @@ function fmt(n) {
   if (n < 1000) return '' + n;
   let i = 0; let v = n;
   while (v >= 1000 && i < NUMSUF.length - 1) { v /= 1000; i++; }
-  return (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)) + NUMSUF[i];
+  let t = v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2);
+  // toFixed can round 999.5 up to "1000" without promoting the suffix -> "1000K"
+  if (parseFloat(t) >= 1000 && i < NUMSUF.length - 1) { v /= 1000; i++; t = v.toFixed(2); }
+  return t + NUMSUF[i];
 }
 function fmtGold(n) { return fmt(n) + 'g'; }
 function pad2(n) { return n < 10 ? '0' + n : '' + n; }
@@ -852,18 +855,20 @@ function vChoir(t, f, d, gain, dest) {
   const c = A.ctx, g = c.createGain(), mixv = c.createGain(); mixv.gain.value = .34;
   const F = [[730, 1090, 2440], [400, 1700, 2300], [640, 1200, 2400]];
   const set = F[(Math.abs(Math.round(f)) % F.length)];
+  // vibrato LFO built first so each harmonic's frequency can actually receive it —
+  // it used to be created after the oscillators and connected to nothing
+  const vib = osc('sine', 4.4, t); const vg = c.createGain(); vg.gain.value = f * .009; vib.connect(vg); vib.start(t); vib.stop(t + d + .9);
   for (const ff of set) {
     const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = fq(ff); bp.Q.value = 7;
     for (const h of [1, 2, 3, 4]) {
       const o = osc(h === 1 ? 'sine' : 'sawtooth', f * h, t, (h - 1) * 4);
       const hg = c.createGain(); hg.gain.value = 1 / (h * h);
-      o.connect(hg); hg.connect(bp); o.start(t); o.stop(t + d + .9);
+      o.connect(hg); hg.connect(bp); vg.connect(o.frequency); o.start(t); o.stop(t + d + .9);
     }
     bp.connect(mixv);
   }
   const n = noiseSrc(t); const nb = c.createBiquadFilter(); nb.type = 'bandpass'; nb.frequency.value = 2400; nb.Q.value = 1.2;
   const ng = c.createGain(); ng.gain.value = .012; n.connect(nb); nb.connect(ng); ng.connect(mixv); n.start(t); n.stop(t + d + .9);
-  const vib = osc('sine', 4.4, t); const vg = c.createGain(); vg.gain.value = f * .009; vib.connect(vg); vib.start(t); vib.stop(t + d + .9);
   env(g, t, .5, .4, .8, .95, d, gain);
   mixv.connect(g); g.connect(dest); sendRev(g, .85);
 }
@@ -1436,7 +1441,7 @@ const CLASSES = [
       { id: 'shot', n: 'Steady Shot', ic: '🏹', cd: 0, cost: 0, cast: 0, rng: 26, t: 'r', dmg: .95, gen: 10, gcd: 1, auto: 1 },
       { id: 'aim', n: 'Aimed Shot', ic: '🎯', cd: 8, cost: 25, cast: 1.6, rng: 30, t: 'r', dmg: 2.6, crit: .2, gcd: 1 },
       { id: 'multi', n: 'Multi-Shot', ic: '🎇', cd: 7, cost: 22, cast: 0, rng: 24, t: 'aoe', dmg: 1.0, rad: 6, gcd: 1 },
-      { id: 'trap', n: 'Frost Trap', ic: '❄', cd: 18, cost: 12, cast: 0, rng: 18, t: 'aoe', dmg: .5, slow: .5, dur: 6, gcd: 1 },
+      { id: 'trap', n: 'Frost Trap', ic: '❄', cd: 18, cost: 12, cast: 0, rng: 18, rad: 6, t: 'aoe', dmg: .5, slow: .5, dur: 6, gcd: 1 },
       { id: 'roll', n: 'Disengage', ic: '💨', cd: 14, cost: 0, cast: 0, rng: 0, t: 'dodge', gcd: 0 },
       { id: 'rapid', n: 'Rapid Fire', ic: '⚡', cd: 75, cost: 0, cast: 0, rng: 0, t: 'buff', buff: { hst: .6, dmg: .2, d: 12 }, gcd: 1 },
     ]
@@ -1573,6 +1578,16 @@ const Q_ESCORT = ['Safe Passage to {p}', 'Guide the Caravan', 'The Long Walk', '
 const Q_ITEMS = ['Bloodroot', 'Ember Shards', 'Iron Scrap', 'Wolf Pelts', 'Rune Fragments', 'Cursed Fangs', 'Bitterleaf',
   'Grave Dust', 'Sunstone', 'Frostglass', 'Void Splinters', 'Old Coins', 'Charred Bone', 'Silver Thread', 'Glowcaps',
   'Serpent Scales', 'Tidepearls', 'Ash Lily', 'Thunder Quills', 'Marrow Ink'];
+/* The four landmark names each zone actually gets. Quest targets and ruin naming both
+   draw from here, so an explore or escort quest always points at a place that exists
+   in its own zone -- previously both picked independently from the full 14-name pool
+   and usually disagreed. */
+function zoneRuinNames(zid) {
+  const r = new RNG((SEED ^ 0x9E37) + zid * 7919);
+  const pool = Q_PLACES.slice();
+  r.shuffle(pool);
+  return pool.slice(0, 4);
+}
 const Q_PLACES = ['the Old Bridge', 'Widow\'s Rise', 'the Sunken Shrine', 'Hangman\'s Reach', 'the Broken Tower',
   'Kettle Falls', 'the Whispering Stones', 'Blackroot Hollow', 'the Sundered Gate', 'Mourner\'s Field', 'Cairn Hill',
   'the Drowned Chapel', 'Rookery Point', 'the Ember Crossing'];
@@ -1604,10 +1619,10 @@ function buildQuests() {
         type = 'collect'; target = rng.pick(Q_ITEMS); need = rng.ri(5, 14);
         name = rng.pick(Q_COLLECT).replace('{i}', target); icon = '📦';
       } else if (roll < .84) {
-        type = 'explore'; target = rng.pick(Q_PLACES); need = 1;
+        type = 'explore'; target = rng.pick(zoneRuinNames(z.id)); need = 1;
         name = rng.pick(Q_EXPLORE).replace('{p}', target); icon = '🧭';
       } else if (roll < .93) {
-        type = 'escort'; target = rng.pick(Q_PLACES); need = 1;
+        type = 'escort'; target = rng.pick(zoneRuinNames(z.id)); need = 1;
         name = rng.pick(Q_ESCORT).replace('{p}', target); icon = '🛡';
       } else {
         type = 'elite'; target = mob + ' Champion'; need = rng.ri(2, 5);
@@ -2217,10 +2232,12 @@ function buildPOI() {
       POI.camps.push({ k: 'camp', n: rng.pick(z.mobs) + ' Camp', x: cx, z: cz, zone: z.id, r: 26, fam: rng.i(6) });
     }
     // ruins / landmarks for flavour + explore quests
+    const ruinNames = zoneRuinNames(z.id);
     for (let i = 0; i < 4; i++) {
       const a = rng.f() * TAU, rad = rng.r(z.r * .3, z.r * .9);
+      rng.f();   // keeps the draw count of the old rng.pick, so the rest of the layout is unchanged
       POI.ruins.push({
-        k: 'ruin', n: rng.pick(Q_PLACES), x: z.cx + Math.cos(a) * rad, z: z.cz + Math.sin(a) * rad,
+        k: 'ruin', n: ruinNames[i], x: z.cx + Math.cos(a) * rad, z: z.cz + Math.sin(a) * rad,
         zone: z.id, r: 16, kind: rng.i(3)
       });
     }
@@ -2239,8 +2256,10 @@ function buildPOI() {
       const h = groundHRaw(p.x, p.z);
       if (h > WATER_Y + 1.6 && slopeRaw(p.x, p.z) < .42) { p.y = h; break; }
       p.x += rng.r(-30, 30); p.z += rng.r(-30, 30);
-      p.x = clamp(p.x, -WORLD_HALF + 30, WORLD_HALF - 30);
-      p.z = clamp(p.z, -WORLD_HALF + 30, WORLD_HALF - 30);
+      // the continent shelf ends at 0.8 * WORLD_HALF; the old clamp let the random
+      // walk carry a POI out into open ocean and strand it there
+      p.x = clamp(p.x, -WORLD_HALF * .8 + 20, WORLD_HALF * .8 - 20);
+      p.z = clamp(p.z, -WORLD_HALF * .8 + 20, WORLD_HALF * .8 - 20);
       p.y = groundHRaw(p.x, p.z);
     }
   }
@@ -2320,6 +2339,11 @@ function getChunkProps(cx, cz) {
     const h = groundH(x, z);
     if (h < WATER_Y - 1.5) continue;
     if (roadDist(x, z) < 5) continue;
+    // the tree loop always rejected town flats; rocks did not, so boulders sat on
+    // plazas and inside buildings -- the big ones with collision, blocking doorways
+    let rskip = false;
+    for (const f of FLATS) { if (Math.hypot(x - f.x, z - f.z) < f.r * .8) { rskip = true; break; } }
+    if (rskip) continue;
     const s = rng.r(.5, 2.4);
     rocks.push({ x, y: h, z, s, r: rng.f() * TAU, rad: s * 0.9, sq: rng.r(.6, 1.3) });
   }
@@ -2328,6 +2352,10 @@ function getChunkProps(cx, cz) {
     const x = ox + rng.f() * CHUNK, z = oz + rng.f() * CHUNK;
     const h = groundH(x, z);
     if (h < WATER_Y + .6 || slopeAt(x, z) > .5) continue;
+    if (roadDist(x, z) < 5) continue;
+    let bskip = false;
+    for (const f of FLATS) { if (Math.hypot(x - f.x, z - f.z) < f.r * .8) { bskip = true; break; } }
+    if (bskip) continue;
     bushes.push({ x, y: h, z, s: rng.r(.5, 1.3), r: rng.f() * TAU, k: rng.i(2) });
   }
   c = { trees, rocks, bushes, cx, cz };
@@ -3378,8 +3406,11 @@ function buildPartMesh() {
 }
 function spawnPart(x, y, z, vx, vy, vz, life, size, r, g, b, a, kind, grav, spin) {
   let i = PART.n;
-  if (i >= PART.cap) {                       // recycle the oldest
-    i = (R.frame * 7) % PART.cap;
+  if (i >= PART.cap) {
+    // rotate through every slot: the old (frame*7) % cap could only ever touch
+    // the 200 slots divisible by 7, so a full pool froze most particles solid
+    PART.cur = ((PART.cur || 0) + 1) % PART.cap;
+    i = PART.cur;
   } else PART.n++;
   PART.px[i] = x; PART.py[i] = y; PART.pz[i] = z;
   PART.vx[i] = vx; PART.vy[i] = vy; PART.vz[i] = vz;
@@ -3821,7 +3852,9 @@ function drawBuilding(b, px, pz, night) {
   if (!close) return;
   for (const pr of b.props) {
     bldWorld(b, pr.x, pr.z, _bp);
-    M4.trs(_m, _bp[0], gy + pr.y, _bp[1], 0, b.rot + pr.r, 0, pr.sx, pr.sy, pr.sz);
+    // meshCylinder is base-anchored (y spans 0..1); boxes and spheres are centred.
+    // placing cylinders with the centred convention floated them half their height.
+    M4.trs(_m, _bp[0], gy + pr.y - (pr.m === 'cyl' ? pr.sy / 2 : 0), _bp[1], 0, b.rot + pr.r, 0, pr.sx, pr.sy, pr.sz);
     const mesh = pr.m === 'sph' ? M.sph : pr.m === 'cyl' ? M.cyl : M.box;
     pushInst(mesh, _m, pr.c[0], pr.c[1], pr.c[2], pr.e + (pr.e ? 0 : lit), 0, .9);
   }
@@ -3832,7 +3865,7 @@ function drawBuilding(b, px, pz, night) {
     pushInst(M.sph, _m, 1.0, .86, .52, 2.0, 0, .2);
   }
   // hearth embers
-  if (b.fire && (R.frame % 4 === 0) && d2 < 60 * 60) {
+  if (b.fire && Math.random() < G.dt * 15 && d2 < 60 * 60) {
     bldWorld(b, b.fire.x, b.fire.z, _bp);
     const cold = b.fire.cold;
     spawnPart(_bp[0] + (Math.random() - .5) * .35, gy + b.fire.y + .3, _bp[1] + (Math.random() - .5) * .35,
@@ -3858,12 +3891,12 @@ function drawTowns(px, pz, viewDist) {
       const a = i / 3 * TAU + .5, r = 13;
       const bx = hub.x + Math.cos(a) * r, bz = hub.z + Math.sin(a) * r;
       const by = groundH(bx, bz);
-      M4.trs(_m, bx, by + .8, bz, 0, 0, 0, .5, 1.6, .5);
+      M4.trs(_m, bx, by, bz, 0, 0, 0, .5, 1.6, .5);
       pushInst(M.cyl, _m, .24, .21, .18, 0, 0, .95);
       const fl = .7 + Math.sin(R.time * 6 + i) * .3;
       M4.trs(_m, bx, by + 1.8, bz, 0, 0, 0, .8, .8, .8);
       pushInst(M.sph, _m, 1.0, .55, .18, 1.4 * fl, 0, .2);
-      if ((R.frame + i * 7) % 5 === 0 && V.dist2(px, pz, bx, bz) < 120 * 120)
+      if (Math.random() < G.dt * 12 && V.dist2(px, pz, bx, bz) < 120 * 120)
         spawnPart(bx + (Math.random() - .5) * .4, by + 2.0, bz + (Math.random() - .5) * .4,
           0, 1.4 + Math.random(), 0, .9, .22, 1, .55, .2, .9, 0, .6, 0);
     }
@@ -3894,7 +3927,7 @@ function drawPOIMarkers(px, pz, viewDist) {
     const pulse = .6 + Math.sin(R.time * 2 + p.raid) * .35;
     M4.trs(_m, p.x, gy + 3, p.z, 0, 0, 0, 4.4, 5.4, .3);
     pushInst(M.rbox, _m, .45, .25, .85, pulse, 0, .2, 1);
-    if ((R.frame + p.raid) % 4 === 0)
+    if (Math.random() < G.dt * 15)
       spawnPart(p.x + (Math.random() - .5) * 4, gy + Math.random() * 5, p.z + (Math.random() - .5) * .6,
         0, .7, 0, 1.2, .3, .6, .35, 1, .8, 0, .2, 0);
   }
@@ -4498,9 +4531,9 @@ function moveEntity(e, wishX, wishZ, speed, dt, isPlayer) {
   const h = groundH(e.x, e.z);
   const inWater = h < WATER_Y - 0.7 && e.y < WATER_Y;
   const grounded = e.y <= h + 0.06;
-  if (grounded) { e.y = h; if (e.vy < 0) { if (e.vy < -12 && isPlayer) { sfx('land', clamp(-e.vy / 26, .2, 1)); R.camShake = clamp(-e.vy / 40, 0, .5); } e.vy = 0; } }
+  if (grounded) { e.y = h; if (e.vy < 0) { if (e.vy < -12 && isPlayer) { sfx('land', clamp(-e.vy / 26, .2, 1)); G.camShake = clamp(-e.vy / 40, 0, .5); } e.vy = 0; } }
   else e.vy -= 27 * dt;
-  if (inWater) { e.vy += 16 * dt; e.vy *= 0.90; speed *= 0.62; }
+  if (inWater) { e.vy += 16 * dt; e.vy *= Math.pow(0.90, dt * 60); speed *= 0.62; }
 
   const wl = Math.hypot(wishX, wishZ);
   if (wl > 1e-4) {
@@ -4530,7 +4563,7 @@ function moveEntity(e, wishX, wishZ, speed, dt, isPlayer) {
   e.y += e.vy * dt;
   const nh = groundH(e.x, e.z);
   if (e.y < nh) { e.y = nh; if (e.vy < 0) e.vy = 0; }
-  if (e.y < WATER_Y - 1.2 && nh < WATER_Y - 1.2) e.y = Math.max(e.y, nh);
+  if (e.y < WATER_Y - 1.2 && nh < WATER_Y - 1.2) e.y = Math.max(e.y, WATER_Y - 1.2);
   e.swim = (nh < WATER_Y - 0.9) ? 1 : 0;
   return { grounded: e.y <= nh + 0.06, inWater };
 }
@@ -4555,11 +4588,24 @@ function dealDamage(src, tgt, amount, kind, noText, splash) {
     const cc = p.st.critP + (kind && kind.crit ? kind.crit : 0);
     if (Math.random() < cc) { dmg *= 2.0 + p.st.mastP * .4; crit = true; }
     if ((p.af.exec || 0) && tgt.hp / tgt.hpMax < .3) dmg *= 1 + p.af.exec * .01;
+    // Opportunist: bonus damage against anything not yet fighting you
+    if ((p.af.oppor || 0) && tgt.isMob && tgt.st !== 'chase') dmg *= 1 + p.af.oppor * .01;
     if (p.surgeT > 0) dmg *= 1.15;
     if (crit && (p.af.surge || 0)) p.surgeT = 4;
   }
+  // boss defensive mechanics, announced in chat and finally real:
+  // a raised shield absorbs most of a hit; a phase shift makes it pass through entirely
+  if ((tgt.phaseT || 0) > 0) { if (!noText) dmgNumber(tgt.x, tgt.y + (tgt.scale || 1) * 1.9, tgt.z, 0, 'shield'); return 0; }
+  if ((tgt.shieldT || 0) > 0) dmg *= 0.3;
   dmg = Math.max(1, Math.round(dmg));
   tgt.hp -= dmg; tgt.hitT = 0.16;
+  // being hit provokes: a mob shot from beyond its aggro radius used to just stand there
+  if (src === p && tgt.isMob && !tgt.dead && tgt.st === 'idle') {
+    tgt.st = 'chase';
+    if (tgt.kind === 'boss') { sfx('roar', 1); banner(tgt.name, tgt.title || 'Boss Encounter'); musicSet('boss'); }
+  }
+  // Chilling: the player's hits slow whatever they land on
+  if (src === p && (p.af.frost || 0) && tgt.isMob) tgt.slowT = Math.max(tgt.slowT || 0, 1 + p.af.frost * .04);
   if (!noText) dmgNumber(tgt.x, tgt.y + (tgt.scale || 1) * 1.9, tgt.z, dmg, crit ? 'crit' : (src === p ? 'dmg' : 'in'));
   if (src === p) {
     p.stats.dmgDone += dmg;
@@ -4629,7 +4675,7 @@ function castAbility(p, ab, target) {
     if (d > ab.rng + (target.scale || 1) * .8) { sfx('error', .5); return false; }
   }
   if (ab.cast > 0) {
-    p.casting = { ab, target, t: 0, dur: ab.cast / (1 + p.st.hasteP) };
+    p.casting = { ab, target, t: 0, dur: ab.cast / (1 + p.st.hasteP + (p.hasteBuff || 0)) };
     sfx('cast', .6);
     p.an.cast = 1;
     return true;
@@ -4639,9 +4685,9 @@ function castAbility(p, ab, target) {
 function execAbility(p, ab, target) {
   const c = CLASS_BY[p.cls];
   if (ab.cost > 0) p.res -= ab.cost;
-  if (ab.gen && c.res === 'rage') p.res = Math.min(p.resMax, p.res + ab.gen);
-  p.cds[ab.id] = ab.cd / (1 + p.st.hasteP * .5);
-  if (ab.gcd) p.gcd = ab.gcd / (1 + p.st.hasteP);
+  if (ab.gen) p.res = Math.min(p.resMax, p.res + ab.gen);   // Steady Shot and Sinister Strike authored gen and never received it
+  p.cds[ab.id] = ab.cd / (1 + (p.st.hasteP + (p.hasteBuff || 0)) * .5);
+  if (ab.gcd) p.gcd = ab.gcd / (1 + p.st.hasteP + (p.hasteBuff || 0));
   p.an.atk = 1; p.an.cast = 0;
   const face = target && !target.dead;
   if (face) faceToward(p, target.x, target.z, 1, 60);
@@ -4864,7 +4910,7 @@ function onMobKilled(m, p) {
     banner('SLAIN', m.name + ', ' + m.title);
     chatPush('kill', p.name + ' has slain ' + m.name + ', ' + m.title + '!');
     R.flash = .7; R.flashCol = [1, .8, .5];
-    R.camShake = .9;
+    G.camShake = .9;
     const loot = rollLoot(p, m.level, bd ? bd.lootTier : 3, 2 + ((Math.random() * 2) | 0));
     for (const it of loot) giveItem(p, it);
     metaBossKilled(p, bd);
@@ -4885,6 +4931,7 @@ function onMobKilled(m, p) {
 function killPlayer(p) {
   if (p.dead) return;
   p.dead = 1; p.an.dead = 1; p.deaths++;
+  p.casting = null; p.an.cast = 0;
   G.deathT = 0;
   sfx('death', 1);
   R.dmgVig = 1;
@@ -4922,6 +4969,8 @@ function updateMob(e, dt, p) {
   e.hitT = Math.max(0, e.hitT - dt);
   e.stunT = Math.max(0, (e.stunT || 0) - dt);
   e.rootT = Math.max(0, (e.rootT || 0) - dt);
+  e.shieldT = Math.max(0, (e.shieldT || 0) - dt);
+  e.phaseT = Math.max(0, (e.phaseT || 0) - dt);
   e.slowT = Math.max(0, (e.slowT || 0) - dt);
   e.atkCd = Math.max(0, e.atkCd - dt);
   e.an.atk = Math.max(0, e.an.atk - dt * 2.6);
@@ -5026,7 +5075,7 @@ function updateBossMechanics(e, dt, p) {
         e.x += nx * (d - 3); e.z += nz * (d - 3); e.y = groundH(e.x, e.z);
         burst(e.x, e.y + 1, e.z, 20, 4, 2, .4, .9, .5, .2, 1, .7);
         applyDamageToPlayer(p, mobDamage(e, p) * 1.5, e);
-        sfx('roar', .7); R.camShake = .6;
+        sfx('roar', .7); G.camShake = .6;
       }
       break;
     }
@@ -5060,16 +5109,25 @@ function applyDamageToPlayer(p, amount, src) {
   if (p.dead || (p.safeT || 0) > 0) return;
   let dmg = amount * (1 - p.st.drP);
   for (const b of p.buffs) if (b.b.dr) dmg *= (1 - b.b.dr);
+  // Warded: the rune eats one hit's worth of damage every six seconds
+  if ((p.af.ward || 0) && (p.wardCd || 0) <= 0 && dmg > 0) {
+    const ab = Math.min(dmg, p.af.ward);
+    dmg -= ab; p.wardCd = 6;
+    sfx('block', .8);
+    dmgNumber(p.x, p.y + 2.5, p.z, Math.round(ab), 'shield');
+  }
   dmg = Math.max(1, Math.round(dmg));
   p.hp -= dmg;
   p.stats.dmgTaken += dmg;
   dmgNumber(p.x, p.y + 2.2, p.z, dmg, 'in');
   R.dmgVig = Math.min(1, R.dmgVig + dmg / p.st.hpMax * 1.6);
-  R.camShake = Math.min(.6, R.camShake + dmg / p.st.hpMax * 1.2);
+  G.camShake = Math.min(.6, G.camShake + dmg / p.st.hpMax * 1.2);
   if ((p.af.thorns || 0) && src && src.isMob) dealDamage(p, src, dmg * p.af.thorns * .01, null, true, true);
   if (CLASS_BY[p.cls].res === 'rage') p.res = Math.min(p.resMax, p.res + 8);
   G.combat = 6;
-  if (p.hp <= 0) killPlayer(p);
+  // during the finale the tape owns your death: the visual Overlord's real swings
+  // must not kill you ahead of (or instead of) the recorded verdict
+  if (p.hp <= 0) { if (G.overlord && !p.ovDown) p.hp = 1; else killPlayer(p); }
 }
 
 /* ------------------------------ AI ADVENTURER AVATARS ------------------------------ */
@@ -5133,6 +5191,14 @@ function updateAIAvatar(e, dt, p) {
         if (e.foe.hp <= 0 && !e.foe.dead) {
           e.foe.dead = 1; e.foe.an.dead = 1; e.foe.deadT = 0;
           burst(e.foe.x, e.foe.y + 1, e.foe.z, 10, 2.4, 2.4, .22, .9, .5, .25, 0, .7);
+          /* without this, a boss slain by the crowd rather than the player skipped the
+             respawn timer and stood back up six seconds later */
+          if (e.foe.kind === 'boss' && e.foe.bossId >= 0) {
+            const bd = DB.bosses[e.foe.bossId];
+            BOSS_STATE[e.foe.bossId] = G.t + (bd ? bd.respawn : 120);
+            chatPush('kill', e.name + ' has slain ' + e.foe.name + (e.foe.title ? ', ' + e.foe.title : '') + '!');
+            if (e.rec) e.rec.bosses++;
+          }
         }
       }
       e.foe.hitT = .16;
@@ -5140,7 +5206,10 @@ function updateAIAvatar(e, dt, p) {
       burst(e.foe.x, e.foe.y + 1, e.foe.z, 4, 1.8, 2, .16, .8, .8, .95, 1, .4);
     }
     faceToward(e, e.foe.x, e.foe.z, dt, 8);
+    const ha = clamp(angDelta(e.yaw, Math.atan2(e.foe.x - e.x, e.foe.z - e.z)), -.65, .65);
+    e.headYaw = (e.headYaw || 0) + (ha - (e.headYaw || 0)) * Math.min(1, dt * 7);
   } else {
+    e.headYaw = (e.headYaw || 0) * Math.max(0, 1 - dt * 4);
     if (!e.dest || V.dist2(e.x, e.z, e.dest[0], e.dest[1]) < 36) {
       e.dest = [rec.tx, rec.tz];
       if (Math.random() < .25) {
@@ -5174,7 +5243,7 @@ function updateSpawns(dt, p) {
     const d = V.dist(e.x, e.z, p.x, p.z);
     if (d > 260) {
       if (e.kind === 'boss') { if (d > 320) { e.remove = 1; } }
-      else { if (e.rec) e.rec.av = null; G.ents.splice(i, 1); continue; }
+      else { e.dead = 1; if (e.rec) e.rec.av = null; G.ents.splice(i, 1); continue; }
     }
     if (e.isMob) mobs++; else if (e.kind === 'ai') ais++;
   }
@@ -5378,12 +5447,19 @@ function updatePlayer(dt, input) {
     if (b.b.dmg) p.buffDmg += b.b.dmg;
     if (b.b.hst) hasteBuff += b.b.hst;
   }
+  // Frenzied: attack speed rises when the wearer is below half health
+  if ((p.af.rage || 0) && p.hp < p.st.hpMax * .5) hasteBuff += p.af.rage * .01;
+  /* Every haste cooldown in the class tables funnelled into this local and was then
+     thrown away -- Avenging Wrath, Rapid Fire, Adrenaline Rush and Incarnation did
+     nothing. Consumers read p.st.hasteP + p.hasteBuff now. */
+  p.hasteBuff = hasteBuff;
+  p.wardCd = Math.max(0, (p.wardCd || 0) - dt);
   if (p.hot) { p.hot.t -= dt; healEntity(p, p.hot.m * dt, true); if (p.hot.t <= 0) p.hot = null; }
   tickDots(p, dt);
-  if (p.hp <= 0) { killPlayer(p); return; }
+  if (p.hp <= 0) { if (G.overlord && !p.ovDown) p.hp = 1; else { killPlayer(p); return; } }
 
   // resource regen
-  if (c.res === 'energy') p.res = Math.min(p.resMax, p.res + 13 * dt * (1 + p.st.hasteP));
+  if (c.res === 'energy') p.res = Math.min(p.resMax, p.res + 13 * dt * (1 + p.st.hasteP + (p.hasteBuff || 0)));
   else if (c.res === 'mana') p.res = Math.min(p.resMax, p.res + p.resMax * 0.045 * dt * (G.combat > 0 ? .5 : 2.2));
   else if (G.combat <= 0) p.res = Math.max(0, p.res - 6 * dt);
 
@@ -5429,11 +5505,13 @@ function updatePlayer(dt, input) {
     const d = V.dist(p.x, p.z, t.x, t.z);
     const auto = c.ab.find(a => a.auto);
     if (d <= auto.rng + (t.scale || 1) * .8 && p.autoAttack !== false) {
-      p.aaT = (p.aaT || 0) - dt * (1 + p.st.hasteP);
+      p.aaT = (p.aaT || 0) - dt * (1 + p.st.hasteP + (p.hasteBuff || 0));
       if (p.aaT <= 0) { p.aaT = 1.9; if (p.gcd <= 0) { castAbility(p, auto, t); G.combat = 6; } }
     }
   }
   if (t && (t.dead || V.dist(p.x, p.z, t.x, t.z) > 78)) G.target = null;
+  const hw = G.target && !G.target.dead ? clamp(angDelta(p.yaw, Math.atan2(G.target.x - p.x, G.target.z - p.z)), -.65, .65) : 0;
+  p.headYaw = (p.headYaw || 0) + (hw - (p.headYaw || 0)) * Math.min(1, dt * 7);
 
   // zone tracking
   const zn = zoneAt(p.x, p.z);
@@ -5459,7 +5537,11 @@ function updatePlayer(dt, input) {
   }
   G.indoorT += dt;
   const ruin = nearestPOI(p.x, p.z, 'ruins', 22);
-  if (ruin) questProgress(p, 'explore', ruin.n, 1);
+  if (ruin) {
+    questProgress(p, 'explore', ruin.n, 1);
+    // escort quests had no completion path at all: 58 of the 660 could never be finished
+    questProgress(p, 'escort', ruin.n, 1);
+  }
 }
 
 /* ------------------------------ WORLD TICK ------------------------------ */
@@ -5470,14 +5552,15 @@ function updateWorld(dt) {
     const g = G.gfx[i];
     g.t += dt;
     if (g.tele) {
-      if ((R.frame + i) % 2 === 0) {
+      if (Math.random() < dt * 30) {
         const a = Math.random() * TAU, r = g.r * Math.sqrt(Math.random());
         spawnPart(g.x + Math.cos(a) * r, g.y + .1, g.z + Math.sin(a) * r, 0, .5, 0, .4, .22, g.col[0], g.col[1], g.col[2], .8, 0, 0, 0);
       }
       if (g.t >= g.dur) {
         if (V.dist2(p.x, p.z, g.x, g.z) < g.r * g.r) applyDamageToPlayer(p, g.dmg, g.src);
         burst(g.x, g.y + .3, g.z, 30, g.r * .7, 5, .5, g.col[0], g.col[1], g.col[2], 0, 1);
-        sfx('fire', .9); R.camShake = .4;
+        spawnPart(g.x, g.y + .35, g.z, 0, 0, 0, .55, g.r * .8, g.col[0], g.col[1], g.col[2], .9, 2, 0, 0);
+        sfx('fire', .9); G.camShake = .4;
         G.gfx.splice(i, 1); continue;
       }
     } else if (g.t >= g.dur) { G.gfx.splice(i, 1); continue; }
@@ -5695,8 +5778,15 @@ function advanceRec(rec, dt, fast) {
   rec.respect += dt * 0.06 * (1 + rec.lv / 90) * S.xp;
 
   // ---- loot rolls ----
-  const rate = 0.055 * S.xp * dt;
-  if (_mrng.f() < rate) {
+  /* One Bernoulli trial per call, however long the step. At metaOffline's coarse steps
+     (30-600 s) the rate is 1.6-33, so a single roll saturated at "one drop chance per
+     step" and an offline world came back with a third of a live world's gear. Roll the
+     expected count instead, capped so one step cannot re-gear a whole character. */
+  let lootN = 0;
+  { let r = 0.055 * S.xp * dt;
+    while (r >= 1 && lootN < 6) { lootN++; r -= 1; }
+    if (_mrng.f() < r) lootN++; }
+  for (let lr = 0; lr < lootN; lr++) {
     const slot = _mrng.i(15);
     let tier = rollTier(_mrng, S.q, rec.skill * 0.25);
     if (tier >= 5) tier = 4;                   // Mythic is awarded, never dropped
@@ -5709,10 +5799,10 @@ function advanceRec(rec, dt, fast) {
       const bt = recBestTier(rec);
       if (bt > rec.best) {
         rec.best = bt;
-        if (bt === 5) claimMythic(rec);
-        if (!fast && bt >= 4) {
-          chatPush('loot', '[' + rec.n + ']: ' + (bt === 5 ? 'ASCENDANT' : 'Legendary') + ' drop — ' +
-            (bt === 5 ? MYTHIC_NAMES[_mrng.i(MYTHIC_NAMES.length)] : LEGEND_NAMES[_mrng.i(LEGEND_NAMES.length)]) + '!');
+        // (a call to a claimMythic() that never existed lived here -- Mythic seats
+        //  belong to tryAscend alone, and a tier-5 drop cannot roll anyway)
+        if (!fast && bt >= 4 && bt < 5) {
+          chatPush('loot', '[' + rec.n + ']: Legendary drop — ' + LEGEND_NAMES[_mrng.i(LEGEND_NAMES.length)] + '!');
         }
       }
     }
@@ -5780,7 +5870,13 @@ function tryAscend(who, quiet) {
     SEASON.milestone = metaNow();
     chatPush('world', '\u2554\u2550 ALL ' + MYTHIC_LIMIT + ' ASCENDANT SEATS CLAIMED \u2014 the season ends in ' +
       Math.round(SEASON_GRACE_MS / 60000) + ' minutes \u2550\u2557');
-    if (!quiet) { banner('FINAL ' + Math.round(SEASON_GRACE_MS / 60000) + ' MINUTES', 'Last push \u2014 level and gear crowns are decided now'); sfx('roar', 1); }
+    if (!quiet) {
+      banner('FINAL ' + Math.round(SEASON_GRACE_MS / 60000) + ' MINUTES', 'Last push \u2014 level and gear crowns are decided now'); sfx('roar', 1);
+      // the augury: your odds of walking out of the Overlord, measured by the real model
+      const odds = ovSurvivalOdds();
+      chatPush('sys', 'The augurs cast your fate against the Overlord: you walk away in ' +
+        Math.round(odds * 100) + '% of the tellings. Gear up.');
+    }
   }
   return true;
 }
@@ -5832,6 +5928,7 @@ function metaOffline(ms) {
     for (let i = 0; i < ROSTER.length; i++) advanceRec(ROSTER[i], realStep, true);
     if ((s % 12) === 0) runClanWar(true);
     if (SEASON.milestone && META_NOW > SEASON.milestone + SEASON_GRACE_MS) break;
+    if (META_NOW > SEASON.start + SEASON_MS) break;   // the 7-day backstop ends the roster's season too
   }
   META_NOW = 0;
   // scatter everyone to sensible places so the world looks lived-in on return
@@ -5874,7 +5971,7 @@ function runClanWar(quiet) {
   const stake = Math.round(40 + Math.min(pa, pb) * 0.02);
   w.wins++; l.losses++;
   w.respect += stake; l.respect = Math.max(0, l.respect - stake * 0.4);
-  WAR_LOG.unshift({ t: Date.now(), w: w.n, l: l.n, s: stake, wi: w.i, li: l.i });
+  WAR_LOG.unshift({ t: metaNow(), w: w.n, l: l.n, s: stake, wi: w.i, li: l.i });
   if (WAR_LOG.length > 60) WAR_LOG.pop();
   if (!quiet) {
     chatPush('world', '⚑ CLAN WAR — ' + w.n + ' defeated ' + l.n + ' (+' + stake + ' respect)');
@@ -6097,7 +6194,7 @@ function pickOf(a) { return a[(Math.random() * a.length) | 0]; }
 /** Send gold to an adventurer. They notice, and they remember. */
 function sendGold(rec, amount) {
   const p = G.player;
-  amount = Math.max(1, Math.min(Math.floor(amount), p.gold));
+  amount = Math.min(Math.floor(amount), p.gold);
   if (amount < 1) { toast('You have no gold to send.', 'sys'); sfx('error', .6); return false; }
   p.gold -= amount;
   rec.gold += amount;
@@ -6120,7 +6217,11 @@ function sendItem(rec, bagIdx) {
   const oldScore = rec.gt[si] ? rec.gi[si] * 1.15 * SLOTS[si].w * RARITY[rec.gt[si] - 1].mult * 2.1 : 0;
   const newScore = it.il * 1.15 * SLOTS[si].w * RARITY[it.t].mult * 2.1;
   let worn = false;
-  if (newScore > oldScore) { rec.gt[si] = it.t + 1; rec.gi[si] = it.il; rec.gs = recGearScore(rec); worn = true; }
+  if (newScore > oldScore) {
+    rec.gt[si] = it.t + 1; rec.gi[si] = it.il; rec.gs = recGearScore(rec); worn = true;
+    const nb = recBestTier(rec);
+    if (nb > rec.best) rec.best = nb;    // or their next own upgrade re-announces your gift as their drop
+  }
   else rec.gold += it.val;
   chatPush('trade', 'You sent [' + it.n + '] to ' + rec.n);
   sfx('coin', 1);
@@ -6659,8 +6760,11 @@ function ovResolve(quiet) {
 /** Mint a relic and hand it to everyone still standing. Idempotent on SEASON.ov.n. */
 function ovAward() {
   const ov = SEASON.ov;
-  if (!ov || ov.ph >= 3) return;
-  ov.ph = 3;
+  /* idempotence keys on its own flag: ph is rewound from 3 to 2 to run the live replay,
+     and gating on ph alone paid the relics a second time on the next boot */
+  if (!ov || ov.paid) return;
+  ov.paid = 1;
+  if (ov.ph < 3) ov.ph = 3;
   if (ov.outcome !== 2) return;                              // wipe and pyrrhic pay nothing
   const rng = new RNG((ov.seed ^ 0x2545F491) | 0);
   if (ov.pAlive) {
@@ -6671,10 +6775,9 @@ function ovAward() {
   /* AI relics are re-granted next season onto roster indices 40+ ONLY. buildRoster gives
      0-39 a skill bonus; relics landing there took 2.25 of the 3 Ascendant seats in testing
      against 0.00 on random indices. Same relics, same count, opposite game. */
-  for (const r of ov.survIdx) {
-    if (ETERNAL.ai.length >= OV.CARRY_MAX) break;
-    ETERNAL.ai.push({ il: eternalIlvl(ov.lvl), s: ov.n });
-  }
+  for (const r of ov.survIdx) ETERNAL.ai.push({ il: eternalIlvl(ov.lvl), s: ov.n });
+  // over the cap, the OLDEST relics pass out of the world -- a full store used to
+  // shut every later season's survivors out entirely
   while (ETERNAL.ai.length > OV.CARRY_MAX) ETERNAL.ai.shift();
 }
 /* ---- the live battle: a replay of a tape that is already written ---- */
@@ -6686,6 +6789,7 @@ let OV_HEADLESS = 0, ovAckT = 0;
 function ovBegin() {
   const ov = SEASON.ov; if (!ov) return;
   const p = G.player;
+  for (const e of G.ents) if (e.rec) e.rec.av = null;   // or those 34 records can never re-instantiate
   G.ents.length = 0; G.proj.length = 0; G.dmg.length = 0; G.target = null; G.inRaid = null;
   p.dead = 0; p.ovDown = 0; p.hp = p.st.hpMax;
   const spot = ovArenaSpot(p.x, p.z);
@@ -6703,6 +6807,7 @@ function ovBegin() {
      and a boom camera left pointing wherever the player last walked shows them a field. */
   G.camYaw = Math.atan2(boss.x - p.x, boss.z - p.z);
   G.camPitch = 0.42; G.camDist = 15;
+  G.target = boss;   // the cast bar lives inside the target frame; without a target it renders to nothing
   banner('THE OVERLORD', 'Kaarnathul, the Unmade');
   chatPush('world', '═══ THE OVERLORD RISES — every adventurer alive stands against it ═══');
   musicSet('boss', true);
@@ -6860,6 +6965,10 @@ function startNewSeason() {
   for (const k in RAID_LOCK) delete RAID_LOCK[k];
   for (const k in BOSS_STATE) delete BOSS_STATE[k];
   TRADE_BOARD.length = 0; WAR_LOG.length = 0;
+  /* open whispers and queued replies reference pre-wipe roster indices; left alive
+     they re-point at whoever the rebuilt roster puts at that index */
+  PENDING.length = 0; CONVO.length = 0;
+  if (typeof AUTO !== 'undefined') { AUTO.reset(); AUTO._snap = null; }
   // reset the player to level 1 with nothing but a plain weapon
   const p = G.player;
   const keepName = p.name, keepCls = p.cls;
@@ -6984,12 +7093,16 @@ function buildActionBar() {
     b.dataset.i = i;
     const fire = e => {
       e.preventDefault(); e.stopPropagation();
+      // read G.player at fire time: startNewSeason replaces the object, and this bar
+      // is only ever built once at boot -- the closure kept casting for a ghost
+      const pl = G.player;
+      if (pl.dead) return;
       if (!G.target || G.target.dead) {
-        const t = pickTarget(p, ab.rng > 6 ? ab.rng : 34);
+        const t = pickTarget(pl, ab.rng > 6 ? ab.rng : 34);
         if (t) G.target = t;
       }
-      castAbility(p, ab, G.target);
-      p.autoOn && setAuto(false);
+      castAbility(pl, ab, G.target);
+      pl.autoOn && setAuto(false);
     };
     b.addEventListener('touchstart', fire, { passive: false });
     b.addEventListener('mousedown', fire);
@@ -7389,7 +7502,7 @@ function drawMinimap(dt) {
     g.beginPath(); g.arc(clamp(m[0], 4, S - 4), clamp(m[1], 4, S - 4), 5, 0, TAU); g.stroke();
   }
   // player arrow
-  g.save(); g.translate(half, half); g.rotate(-G.camYaw);
+  g.save(); g.translate(half, half); g.rotate(PI - G.camYaw);   // -yaw alone points the arrow 180deg the wrong way
   g.fillStyle = '#fff'; g.strokeStyle = '#000'; g.lineWidth = 1;
   g.beginPath(); g.moveTo(0, -6); g.lineTo(4.4, 5); g.lineTo(0, 2.6); g.lineTo(-4.4, 5); g.closePath();
   g.fill(); g.stroke();
@@ -7412,7 +7525,7 @@ function setupInput() {
     const r = stickRect();
     // re-centre the stick under the finger for comfort
     if (Math.hypot(x - (r.left + r.width / 2), y - (r.top + r.height / 2)) > r.width * .6) {
-      stick.style.left = (x - r.width / 2 - (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sal')) || 0)) + 'px';
+      stick.style.left = (x - r.width / 2) + 'px';
       stick.style.bottom = 'auto';
       stick.style.top = (y - r.height / 2) + 'px';
     }
@@ -7476,7 +7589,7 @@ function setupInput() {
     if (e.touches.length === 2) {
       pinchD = Math.hypot(e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
     }
-    if (e.target && e.target.closest && !e.target.closest('#panel,#boot,#seasonend,input')) e.preventDefault();
+    if (e.target && e.target.closest && !e.target.closest('#panel,#boot,#seasonend,#interact,input')) e.preventDefault();
   }, { passive: false });
   cv.addEventListener('touchmove', e => {
     for (const t of e.changedTouches) onMove(t.identifier, t.clientX, t.clientY);
@@ -7485,7 +7598,7 @@ function setupInput() {
       if (pinchD) G.camDist = clamp(G.camDist * (pinchD / d), 3.2, 20);
       pinchD = d;
     }
-    if (e.target && e.target.closest && !e.target.closest('#panel,#boot,#seasonend,input')) e.preventDefault();
+    if (e.target && e.target.closest && !e.target.closest('#panel,#boot,#seasonend,#interact,input')) e.preventDefault();
   }, { passive: false });
   const upH = e => { for (const t of e.changedTouches) onUp(t.identifier, t.clientX, t.clientY); pinchD = 0; };
   cv.addEventListener('touchend', upH, { passive: true });
@@ -7505,7 +7618,7 @@ function setupInput() {
     if (e.code === 'Space') { INPUT.jump = true; e.preventDefault(); }
     if (e.code === 'Tab') { G.target = pickTarget(G.player, 40); e.preventDefault(); }
     if (e.code === 'KeyF') { setAuto(!G.player.autoOn); }
-    if (e.code.startsWith('Digit')) {
+    if (e.code.startsWith('Digit') && !G.player.dead) {
       const i = parseInt(e.code.slice(5)) - 1;
       const c = CLASS_BY[G.player.cls];
       if (c.ab[i]) { if (!G.target || G.target.dead) G.target = pickTarget(G.player, 34); castAbility(G.player, c.ab[i], G.target); }
@@ -7558,7 +7671,7 @@ function setAuto(on) {
 }
 
 /* ------------------------------ PANELS ------------------------------ */
-let PANEL = null, PANEL_TAB = {};
+let PANEL = null, PANEL_TAB = {}, PANEL_MODAL = false;
 const PANEL_DEF = {
   char: { t: 'Character', tabs: ['Gear', 'Stats', 'Season'] },
   bag: { t: 'Inventory', tabs: ['Bags', 'Trade Post', 'Sell'] },
@@ -7593,18 +7706,20 @@ function panelOpen2() {
   renderPanel();
 }
 function panelClose() {
-  PANEL = null;
+  PANEL = null; PANEL_MODAL = false;
   $('panel').classList.remove('on');
   document.querySelectorAll('#bar .mb').forEach(b => b.classList.remove('on'));
   hideTip();
 }
 function renderPanel() {
   if (!PANEL) return;
+  if (PANEL_MODAL) return;   // an open inspect sheet was being overwritten by delayed reply callbacks
   const body = $('pbody');
   const tab = PANEL_TAB[PANEL] || 0;
-  body.scrollTop = body.scrollTop;
+  const keep = body.scrollTop;
   body.innerHTML = PANEL_RENDER[PANEL] ? PANEL_RENDER[PANEL](tab) : '';
   bindPanelActions(body);
+  body.scrollTop = keep;   // the loop re-renders open panels; losing your place twice a second reads as a broken screen
 }
 function bindPanelActions(root) {
   root.querySelectorAll('[data-act]').forEach(e => {
@@ -7710,7 +7825,7 @@ const PANEL_RENDER = {
     ['Items Found', st.itemsFound], ['Gold Earned', fmt(st.goldEarned)], ['Distance Travelled', fmt(st.distance) + ' m'],
     ['Time Played', dur(p.playtime * 1000)], ['Seasons Played', (st.seasons || 0) + 1]];
     for (const [k, v] of rows) h += '<div class="row"><span class="k">' + k + '</span><b>' + v + '</b></div>';
-    const hof = hallOfFame(1000);
+    const hof = hallOfFame(POP + 1);
     const rank = hof.findIndex(r => r.isPlayer) + 1;
     h += '<h4 class="sec">Standing</h4><div class="card center"><div style="font-size:26px;font-weight:900;color:var(--gold)">#' + rank + '</div>' +
       '<div class="tiny">of ' + (POP + 1) + ' adventurers this season</div></div>';
@@ -7735,7 +7850,7 @@ const PANEL_RENDER = {
         '<div class="btn sm" data-act="selljunk">💰 Sell Junk</div></div>';
       if (!p.bags.length) return h + '<div class="tiny center" style="padding:26px">Your bags are empty. Go kill something.</div>';
       h += '<div class="slotgrid">';
-      p.bags.forEach((it, i) => { h += cellHTML(it, 'bag', i, 'data-act="bagclick" data-v="' + i + '"'); });
+      p.bags.forEach((it, i) => { h += cellHTML(it, 'bag', i, 'data-act="bagclick" data-v="' + it.u + '"'); });
       h += '</div><div class="tiny center" style="margin-top:8px">Tap an item to equip it. Hold to inspect.</div>';
       h += '<h4 class="sec">Bag Contents</h4>';
       p.bags.forEach((it, i) => {
@@ -7744,8 +7859,8 @@ const PANEL_RENDER = {
         h += '<div class="eqrow">' + cellHTML(it, 'bag', i) + '<div class="info"><div class="n q' + it.t + '">' + esc(it.n) + '</div>' +
           '<div class="s">' + SLOT_BY[it.sl].n + ' · ilvl ' + it.il + ' · <span style="color:' + (d >= 0 ? '#4ad24a' : '#e0492f') + '">' +
           (d >= 0 ? '+' : '') + fmt(d) + '</span></div></div>' +
-          '<div class="btn sm gold" data-act="equip" data-v="' + i + '">Equip</div>' +
-          '<div class="btn sm" data-act="sell" data-v="' + i + '">' + fmt(it.val) + 'g</div></div>';
+          '<div class="btn sm gold" data-act="equip" data-v="' + it.u + '">Equip</div>' +
+          '<div class="btn sm" data-act="sell" data-v="' + it.u + '">' + fmt(it.val) + 'g</div></div>';
       });
       return h;
     }
@@ -7758,7 +7873,7 @@ const PANEL_RENDER = {
         const d = it.sc - (cur ? cur.sc : 0);
         h += '<div class="eqrow">' + cellHTML(it, 'trade', i) + '<div class="info"><div class="n q' + it.t + '">' + esc(it.n) + '</div>' +
           '<div class="s">' + esc(o.seller) + ' · ilvl ' + it.il + ' · <span style="color:' + (d >= 0 ? '#4ad24a' : '#e0492f') + '">' + (d >= 0 ? '+' : '') + fmt(d) + '</span></div></div>' +
-          '<div class="btn sm ' + (G.player.gold >= o.price ? 'gold' : 'dis') + '" data-act="buy" data-v="' + i + '">' + fmt(o.price) + 'g</div></div>';
+          '<div class="btn sm ' + (G.player.gold >= o.price ? 'gold' : 'dis') + '" data-act="buy" data-v="' + o.id + '">' + fmt(o.price) + 'g</div></div>';
       });
       return h;
     }
@@ -7779,7 +7894,7 @@ const PANEL_RENDER = {
     p.bags.forEach((it, i) => {
       h += '<div class="eqrow">' + cellHTML(it, 'bag', i) + '<div class="info"><div class="n q' + it.t + '">' + esc(it.n) + '</div>' +
         '<div class="s">' + SLOT_BY[it.sl].n + ' · ilvl ' + it.il + '</div></div>' +
-        '<div class="btn sm grn" data-act="board" data-v="' + i + '">List ' + fmt(Math.round(it.val * 1.25)) + 'g</div></div>';
+        '<div class="btn sm grn" data-act="board" data-v="' + it.u + '">List ' + fmt(Math.round(it.val * 1.25)) + 'g</div></div>';
     });
     return h;
   },
@@ -8154,7 +8269,7 @@ const PANEL_RENDER = {
       '<div class="row"><span class="k">Level cap</span><b>none</b></div>' +
       '<div class="row"><span class="k">Item cap</span><b>none</b></div>' +
       '<div class="row"><span class="k">Season length</span><b>7 real days</b></div>' +
-      '<div class="row"><span class="k">World size</span><b>' + (WORLD_SIZE / 1000).toFixed(1) + ' km²</b></div>' +
+      '<div class="row"><span class="k">World size</span><b>' + ((WORLD_SIZE / 1000) ** 2).toFixed(1) + ' km² (' + (WORLD_SIZE / 1000).toFixed(1) + ' km across)</b></div>' +
       '<h4 class="sec">Controls</h4>' +
       '<div class="tiny">Left half of the screen: move (push to the edge to sprint). Right half: swipe to look, pinch to zoom, tap an enemy to target. ' +
       'Buttons bottom-right are your abilities. On a keyboard: WASD, Space, 1–6, Tab to target, F for auto.</div>';
@@ -8165,21 +8280,26 @@ const PANEL_RENDER = {
 function PANEL_ACT(a, v, node) {
   const p = G.player;
   switch (a) {
-    case 'equip': equipItem(p, +v); uiDirty.bag = 1; renderPanel(); break;
-    case 'bagclick': equipItem(p, +v); renderPanel(); break;
+    case 'equip': { const bi = p.bags.findIndex(b => b.u === +v); if (bi >= 0) equipItem(p, bi); uiDirty.bag = 1; renderPanel(); break; }
+    case 'bagclick': { const bi = p.bags.findIndex(b => b.u === +v); if (bi >= 0) equipItem(p, bi); renderPanel(); break; }
     case 'unequip': {
       const it = p.gear[v];
-      if (it) { delete p.gear[v]; p.bags.push(it); p.st = calcStats(p); styleFromGear(p, p.gear, p.cls); sfx('ui', .7); }
+      if (it) {
+        delete p.gear[v]; p.bags.push(it);
+        p.st = calcStats(p); p.resMax = resourceMax(p);
+        p.hp = Math.min(p.hp, p.st.hpMax); p.res = Math.min(p.res, p.resMax);
+        styleFromGear(p, p.gear, p.cls); sfx('ui', .7);
+      }
       renderPanel(); break;
     }
     case 'sell': {
-      const it = p.bags[+v];
-      if (it) { p.bags.splice(+v, 1); giveGold(p, it.val); sfx('coin', .9); }
+      const bi = p.bags.findIndex(b => b.u === +v);
+      if (bi >= 0) { const it = p.bags[bi]; p.bags.splice(bi, 1); giveGold(p, it.val); sfx('coin', .9); }
       renderPanel(); break;
     }
-    case 'board': sellToBoard(+v); renderPanel(); break;
+    case 'board': { const bi = p.bags.findIndex(b => b.u === +v); if (bi >= 0) sellToBoard(bi); renderPanel(); break; }
     case 'offer': acceptOffer(+v); renderPanel(); break;
-    case 'buy': buyTrade(+v); renderPanel(); break;
+    case 'buy': { const ti = TRADE_BOARD.findIndex(x => x.id === +v); if (ti >= 0) buyTrade(ti); renderPanel(); break; }
     case 'equipbest': { const n = autoEquipBest(p); toast(n ? 'Equipped ' + n + ' upgrade' + (n > 1 ? 's' : '') : 'Nothing better in your bags.', 'sys'); renderPanel(); break; }
     case 'selljunk': { const r = sellJunk(p); toast(r.n ? 'Sold ' + r.n + ' items for ' + fmt(r.g) + 'g' : 'No junk to sell.', 'sys'); renderPanel(); break; }
     case 'accept': acceptQuest(p, +v); renderPanel(); break;
@@ -8200,7 +8320,7 @@ function PANEL_ACT(a, v, node) {
     case 'quality': R.quality = +v; applyQuality(); renderPanel(); break;
     case 'rscale': SET.rscale = +v / 100; onResize(); renderPanel(); break;
     case 'save': saveGame(); toast('Saved.', 'sys'); break;
-    case 'wipe': if (confirm('Delete your save and start a fresh season?')) { localStorage.removeItem(SAVE_KEY); location.reload(); } break;
+    case 'wipe': if (confirm('Delete your save and start a fresh season?')) { G.wiping = 1; localStorage.removeItem(SAVE_KEY); location.reload(); } break;
     case 'givegold': {
       const [ri, raw] = v.split(':');
       const rec = ROSTER[+ri]; if (!rec) break;
@@ -8209,9 +8329,11 @@ function PANEL_ACT(a, v, node) {
       break;
     }
     case 'giveitem': {
-      const [ri, bi] = v.split(':');
+      const [ri, iu] = v.split(':');
       const rec = ROSTER[+ri]; if (!rec) break;
-      sendItem(rec, +bi); showAIInspect(rec);
+      const bi = p.bags.findIndex(b => b.u === +iu);
+      if (bi >= 0) sendItem(rec, bi);
+      showAIInspect(rec);
       break;
     }
     case 'askgold': { const rec = ROSTER[+v]; if (rec) { askForGold(rec); showAIInspect(rec); } break; }
@@ -8235,7 +8357,7 @@ function showAIInspect(rec) {
   if (!rec) return;
   const g = rec.g >= 0 && GUILDS[rec.g] ? GUILDS[rec.g] : null;
   const cls = CLASS_BY[rec.c];
-  const hof = hallOfFame(1000);
+  const hof = hallOfFame(POP + 1);
   const rank = hof.findIndex(r => r.i === rec.i) + 1;
   let h = '<div class="card"><div style="display:flex;gap:10px;align-items:center">' +
     '<div style="font-size:32px">' + cls.ic + '</div><div style="flex:1">' +
@@ -8280,7 +8402,7 @@ function showAIInspect(rec) {
     p.bags.forEach((it, i) => {
       h += '<div class="eqrow">' + cellHTML(it, 'bag', i) + '<div class="info"><div class="n q' + it.t + '">' + esc(it.n) + '</div>' +
         '<div class="s">' + SLOT_BY[it.sl].n + ' · ilvl ' + it.il + ' · worth ' + fmt(it.val) + 'g</div></div>' +
-        '<div class="btn sm grn" data-act="giveitem" data-v="' + rec.i + ':' + i + '">Send</div></div>';
+        '<div class="btn sm grn" data-act="giveitem" data-v="' + rec.i + ':' + it.u + '">Send</div></div>';
     });
   }
   if (g) h += '<h4 class="sec">Clan</h4><div class="card click" data-act="guildinfo" data-v="' + g.i + '"><b style="color:' + g.col + '">' + esc(g.n) + '</b><div class="tiny">"' + esc(g.motto) + '" · ' + g.members.length + ' members · ' + fmt(Math.round(g.respect)) + ' respect</div></div>';
@@ -8315,10 +8437,13 @@ function showGuildInspect(gi) {
 }
 function openModal(title, html) {
   PANEL = PANEL || 'hof';
+  PANEL_MODAL = true;
   $('panel').classList.add('on');
   $('ptitle').textContent = title;
   $('ptabs').innerHTML = '<div class="tab on" data-act="back">‹ Back</div>';
-  $('ptabs').firstChild.onclick = () => { sfx('ui', .6); panelOpen2(); };
+  /* Back used to call panelOpen2, which never rebuilds def.tabs -- the panel came back
+     with only the Back chip and no way to change tabs. Reopen properly instead. */
+  $('ptabs').firstChild.onclick = () => { sfx('ui', .6); PANEL_MODAL = false; const back = PANEL; PANEL = null; panelOpen(back); };
   $('pbody').innerHTML = html;
   $('pbody').scrollTop = 0;
   bindPanelActions($('pbody'));
@@ -8356,7 +8481,7 @@ function ovResultHTML(rec) {
         '<b style="color:' + (c.dead > 100 ? '#ff5a72' : c.dead > 0 ? '#e0b070' : '#8f98a9') + '">' +
         (c.dead > 0 ? '−' + fmt(c.dead) : '—') + '</b></div>').join('') + '</div>';
   }
-  if (win && ETERNAL.p.length) {
+  if (win && ov.pAlive && ETERNAL.p.length) {
     const it = ETERNAL.p[ETERNAL.p.length - 1];
     h += '<div style="max-width:460px;margin:12px auto"><h4 class="sec">What You Carried Out</h4>' +
       '<div class="card" style="border-color:#7ff2ff"><b class="q6">' + esc(it.n) + '</b>' +
@@ -8483,6 +8608,7 @@ const AUTO = {
     this.setGoal(z.hx, z.hz, 'travel', z.n);
   },
   statusHTML() {
+    if (G.overlord) return ovStatusLine();
     let s = '<b>' + esc(this.actLabel) + '</b>';
     if (this.goalName) s += '<br>→ ' + esc(this.goalName);
     if (this.sessionKills) s += '<br><span style="opacity:.8">' + this.sessionKills + ' kills · ' + fmt(this.sessionGold) + 'g · ' + this.sessionItems + ' drops</span>';
@@ -8846,7 +8972,8 @@ function packRoster() {
       r.gt.join(','), r.gi.join(','), r.g, r.st, +r.skill.toFixed(3),
       Math.round(r.x), Math.round(r.z), Math.round(r.respect), Math.round(r.kills),
       Math.round(r.quests), Math.round(r.bosses), Math.round(r.raids), r.deaths, r.best,
-      r.title, r.sk, r.hr, r.z2, r.pvp, +(r.gen || .5).toFixed(3), +(r.rel || 0).toFixed(3)]);
+      r.title, r.sk, r.hr, r.z2, r.pvp, +(r.gen || .5).toFixed(3), +(r.rel || 0).toFixed(3),
+      r.asked || 0]);
   }
   return out;
 }
@@ -8861,7 +8988,7 @@ function unpackRoster(arr) {
       x: a[11], z: a[12], tx: a[11], tz: a[12],
       respect: a[13], kills: a[14], quests: a[15], bosses: a[16], raids: a[17],
       deaths: a[18], best: a[19], title: a[20], sk: a[21], hr: a[22], z2: a[23], pvp: a[24] || 0,
-      gen: a[25] == null ? .5 : a[25], rel: a[26] || 0, asked: 0,
+      gen: a[25] == null ? .5 : a[25], rel: a[26] || 0, asked: a[27] || 0,
       av: null, online: 1, hof: 0, mythicAt: 0,
     });
   }
@@ -8878,9 +9005,10 @@ function unpackGuilds(arr) {
 }
 function saveGame() {
   const p = G.player; if (!p) return;
+  if (G.wiping) return;   // the settings wipe races the unload/visibility saves and used to lose
   try {
     const data = {
-      v: 1, ts: Date.now(),
+      v: 1, ts: Date.now(), tod: G.tod,
       season: { num: SEASON.num, start: SEASON.start, ended: SEASON.ended, champions: SEASON.champions,
         milestone: SEASON.milestone, ascended: SEASON.ascended, ov: SEASON.ov },
       mythic: Array.from(MYTHIC_HOLDERS),
@@ -8923,6 +9051,8 @@ function applySave(d) {
   Object.assign(RAID_LOCK, d.lock || {});
   WAR_LOG.length = 0; (d.wars || []).forEach(w => WAR_LOG.push(w));
   ITEM_UID = d.uid || 1;
+  if (d.tod != null) G.tod = d.tod;                    // the day/night cycle reset to 07:12 on every reload
+  audioSetVol(SET.volm, SET.vols);   // the buses were ramped from defaults before the save loaded
   const s = d.p;
   const p = makePlayer(s.n, s.c);
   p.level = s.lv; p.xp = s.xp; p.gold = s.gold;
@@ -8945,9 +9075,18 @@ function applySave(d) {
 /* metaOffline stops the roster dead at the grace deadline, but playerOffline advanced
    the player for the FULL absence — so a returning player arrived at their own finale
    having grown for hours the rest of the world did not get. Clamp both to the same cutoff. */
+/** When this season actually ends/ended, in real epoch ms. */
+function ovSeasonEndTs() {
+  const byClock = SEASON.start + SEASON_MS;
+  return SEASON.milestone ? Math.min(byClock, SEASON.milestone + SEASON_GRACE_MS) : byClock;
+}
 function playerOffline0(ms) {
-  const left = seasonLeft();
-  return playerOffline(left > 0 ? Math.min(ms, left) : Math.min(ms, 60000));
+  /* seasonLeft() clamps at zero, so the old version credited at most 60s once the season
+     had ended -- and worse, when it had NOT ended it clamped a long absence to the time
+     remaining measured at RETURN, double-counting the absence itself. Credit exactly the
+     slice of the absence that lay inside the season. */
+  const t0 = Date.now() - ms;
+  return playerOffline(Math.max(0, Math.min(ms, ovSeasonEndTs() - t0)));
 }
 function playerOffline(ms) {
   const p = G.player;
@@ -8993,7 +9132,7 @@ function playerOffline(ms) {
     p.stats.raidsDone += 0.0042 * realStep * EFF * 0.09;
     p.respect += 0.06 * (1 + p.level / 90) * realStep * EFF;
   }
-  p.gold = Math.round(p.gold);
+  p.gold = Math.round(p.gold); p.kills = Math.round(p.kills);
   p.doneCount = Math.round(p.doneCount); p.bossKills = Math.round(p.bossKills);
   p.stats.raidsDone = Math.round(p.stats.raidsDone);
   p.stats.questsDone = p.doneCount; p.stats.bossesKilled = p.bossKills;
@@ -9136,7 +9275,7 @@ async function startGame(saved) {
     // ---- offline catch-up ----
     const elapsed = Math.max(0, Date.now() - lastTs);
     let ovDone = [];
-    if (saved && elapsed > 20000) {
+    if (saved && elapsed > 20000 && !ovIsActive()) {
       const mine = playerOffline0(elapsed);
       ovDone = ovCatchUp(elapsed);
       showWelcomeBack(elapsed, mine, ovDone);
@@ -9151,8 +9290,16 @@ async function startGame(saved) {
     setInterval(() => { if (G.started) saveGame(); }, 20000);
     window.addEventListener('beforeunload', () => saveGame());
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) { saveGame(); }
-      else { audioResume(); lastFrame = performance.now(); }
+      if (document.hidden) { lastHideTs = Date.now(); saveGame(); }
+      else {
+        audioResume(); lastFrame = performance.now();
+        const hid = lastHideTs ? Date.now() - lastHideTs : 0;
+        lastHideTs = 0;
+        /* rAF throttles a hidden tab to nothing, so that time used to be unearnable.
+           Credit it like a closed tab. 60s floor = playerOffline's own minimum, so
+           ordinary tab-flips cost nothing. */
+        if (hid > 60000 && !ovIsActive()) { metaOffline(hid); playerOffline0(hid); }
+      }
     });
   } catch (e) {
     console.error(e);
@@ -9168,17 +9315,30 @@ async function startGame(saved) {
    whole run of them on return. Bounded, or a month away simulates forever. */
 function ovCatchUp(elapsed) {
   const done = [];
-  let left = elapsed, guard = 0;
-  while (left > 20000 && guard++ < OV.CATCHUP_MAX) {
-    metaOffline(left);                                  // stops dead at the grace deadline
-    if (seasonLeft() > 0) break;                        // this season has not actually ended
-    const before = SEASON.num;
-    endSeason(true);                                    // resolves the Overlord, quietly
-    done.push({ num: before, ov: SEASON.ov });
-    const span = Math.max(60000, Date.now() - SEASON.start);
-    left -= span;
-    if (left > 20000) { SEASON.start = Date.now() - Math.max(0, left); ovStartNextSeason(); }
-  }
+  /* a saved, unacknowledged verdict freezes the world exactly as metaTick does live --
+     advancing the roster under it would leave the survivor list contradicting the board */
+  if (ovIsActive()) return done;
+  let guard = 0;
+  OV_HEADLESS = 1;
+  try {
+    while (elapsed > 20000 && guard++ < OV.CATCHUP_MAX) {
+      metaOffline(elapsed);                             // stops dead at the season's deadline
+      if (seasonLeft() > 0) break;                      // this season never actually ended
+      const endTs = ovSeasonEndTs();                    // when, in real time, it DID end
+      const before = SEASON.num;
+      endSeason(true);                                  // resolves and pays the Overlord, quietly
+      done.push({ num: before, ov: SEASON.ov });
+      /* the old code subtracted the season's whole age (always >= the absence), went
+         negative on iteration one, and could never resolve a second season */
+      elapsed = Math.max(0, Date.now() - endTs);
+      if (elapsed > 20000) {
+        ovStartNextSeason();
+        SEASON.start = Date.now() - elapsed;            // the new season began when the old one ended
+      }
+    }
+    // the tail of the absence belongs to the season that is now open
+    if (done.length && elapsed > 60000 && seasonLeft() > 0) playerOffline0(elapsed);
+  } finally { OV_HEADLESS = 0; }
   return done;
 }
 /* A verdict can exist without ever having been paid or shown — the tab closed between
@@ -9188,7 +9348,7 @@ function ovCatchUp(elapsed) {
 function ovBootRecover() {
   const ov = SEASON.ov;
   if (!ov || ov.n !== SEASON.num) return;
-  if (ov.ph < 3) ovAward();
+  ovAward();                     // safe: idempotent on ov.paid, and ph alone lies after a replay rewind
   if (ov.ph < 5) { ov.ph = 4; showSeasonEnd(SEASON.champions[0]); }
 }
 function showWelcomeBack(ms, mine, ovDone) {
@@ -9230,7 +9390,7 @@ function showWelcomeBack(ms, mine, ovDone) {
 }
 
 /* ------------------------------ MAIN LOOP ------------------------------ */
-let lastFrame = 0, fpsAcc = 0, fpsN = 0, autoSampleT = 0;
+let lastFrame = 0, fpsAcc = 0, fpsN = 0, autoSampleT = 0, lastHideTs = 0;
 function loop(ts) {
   requestAnimationFrame(loop);
   if (!G.started || R.lost) return;
@@ -9298,6 +9458,14 @@ function loop(ts) {
     // live leaderboards refresh while you watch them
     if ($('ptabs').firstChild && $('ptabs').firstChild.dataset.act !== 'back') renderPanel();
   }
+  /* the dirty flags finally have readers: an open bag repaints when auto-play equips or
+     sells underneath it, the quest log when progress ticks, and anything on a season event */
+  if (PANEL && !PANEL_MODAL) {
+    if ((uiDirty.bag && PANEL === 'bag') || (uiDirty.quests && PANEL === 'quest') || uiDirty.all) {
+      renderPanel();
+      uiDirty.bag = 0; uiDirty.quests = 0; uiDirty.all = 0;
+    }
+  } else { uiDirty.bag = 0; uiDirty.quests = 0; uiDirty.all = 0; }
   if (PANEL === 'map' && $('bigmap')) drawBigMap();
 }
 

@@ -169,7 +169,7 @@ const CLASSES = [
       { id: 'shot', n: 'Steady Shot', ic: '🏹', cd: 0, cost: 0, cast: 0, rng: 26, t: 'r', dmg: .95, gen: 10, gcd: 1, auto: 1 },
       { id: 'aim', n: 'Aimed Shot', ic: '🎯', cd: 8, cost: 25, cast: 1.6, rng: 30, t: 'r', dmg: 2.6, crit: .2, gcd: 1 },
       { id: 'multi', n: 'Multi-Shot', ic: '🎇', cd: 7, cost: 22, cast: 0, rng: 24, t: 'aoe', dmg: 1.0, rad: 6, gcd: 1 },
-      { id: 'trap', n: 'Frost Trap', ic: '❄', cd: 18, cost: 12, cast: 0, rng: 18, t: 'aoe', dmg: .5, slow: .5, dur: 6, gcd: 1 },
+      { id: 'trap', n: 'Frost Trap', ic: '❄', cd: 18, cost: 12, cast: 0, rng: 18, rad: 6, t: 'aoe', dmg: .5, slow: .5, dur: 6, gcd: 1 },
       { id: 'roll', n: 'Disengage', ic: '💨', cd: 14, cost: 0, cast: 0, rng: 0, t: 'dodge', gcd: 0 },
       { id: 'rapid', n: 'Rapid Fire', ic: '⚡', cd: 75, cost: 0, cast: 0, rng: 0, t: 'buff', buff: { hst: .6, dmg: .2, d: 12 }, gcd: 1 },
     ]
@@ -306,6 +306,16 @@ const Q_ESCORT = ['Safe Passage to {p}', 'Guide the Caravan', 'The Long Walk', '
 const Q_ITEMS = ['Bloodroot', 'Ember Shards', 'Iron Scrap', 'Wolf Pelts', 'Rune Fragments', 'Cursed Fangs', 'Bitterleaf',
   'Grave Dust', 'Sunstone', 'Frostglass', 'Void Splinters', 'Old Coins', 'Charred Bone', 'Silver Thread', 'Glowcaps',
   'Serpent Scales', 'Tidepearls', 'Ash Lily', 'Thunder Quills', 'Marrow Ink'];
+/* The four landmark names each zone actually gets. Quest targets and ruin naming both
+   draw from here, so an explore or escort quest always points at a place that exists
+   in its own zone -- previously both picked independently from the full 14-name pool
+   and usually disagreed. */
+function zoneRuinNames(zid) {
+  const r = new RNG((SEED ^ 0x9E37) + zid * 7919);
+  const pool = Q_PLACES.slice();
+  r.shuffle(pool);
+  return pool.slice(0, 4);
+}
 const Q_PLACES = ['the Old Bridge', 'Widow\'s Rise', 'the Sunken Shrine', 'Hangman\'s Reach', 'the Broken Tower',
   'Kettle Falls', 'the Whispering Stones', 'Blackroot Hollow', 'the Sundered Gate', 'Mourner\'s Field', 'Cairn Hill',
   'the Drowned Chapel', 'Rookery Point', 'the Ember Crossing'];
@@ -337,10 +347,10 @@ function buildQuests() {
         type = 'collect'; target = rng.pick(Q_ITEMS); need = rng.ri(5, 14);
         name = rng.pick(Q_COLLECT).replace('{i}', target); icon = '📦';
       } else if (roll < .84) {
-        type = 'explore'; target = rng.pick(Q_PLACES); need = 1;
+        type = 'explore'; target = rng.pick(zoneRuinNames(z.id)); need = 1;
         name = rng.pick(Q_EXPLORE).replace('{p}', target); icon = '🧭';
       } else if (roll < .93) {
-        type = 'escort'; target = rng.pick(Q_PLACES); need = 1;
+        type = 'escort'; target = rng.pick(zoneRuinNames(z.id)); need = 1;
         name = rng.pick(Q_ESCORT).replace('{p}', target); icon = '🛡';
       } else {
         type = 'elite'; target = mob + ' Champion'; need = rng.ri(2, 5);

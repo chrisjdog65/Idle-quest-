@@ -45,6 +45,7 @@ const AUTO = {
     this.setGoal(z.hx, z.hz, 'travel', z.n);
   },
   statusHTML() {
+    if (G.overlord) return ovStatusLine();
     let s = '<b>' + esc(this.actLabel) + '</b>';
     if (this.goalName) s += '<br>→ ' + esc(this.goalName);
     if (this.sessionKills) s += '<br><span style="opacity:.8">' + this.sessionKills + ' kills · ' + fmt(this.sessionGold) + 'g · ' + this.sessionItems + ' drops</span>';

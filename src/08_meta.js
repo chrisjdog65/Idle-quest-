@@ -149,8 +149,15 @@ function advanceRec(rec, dt, fast) {
   rec.respect += dt * 0.06 * (1 + rec.lv / 90) * S.xp;
 
   // ---- loot rolls ----
-  const rate = 0.055 * S.xp * dt;
-  if (_mrng.f() < rate) {
+  /* One Bernoulli trial per call, however long the step. At metaOffline's coarse steps
+     (30-600 s) the rate is 1.6-33, so a single roll saturated at "one drop chance per
+     step" and an offline world came back with a third of a live world's gear. Roll the
+     expected count instead, capped so one step cannot re-gear a whole character. */
+  let lootN = 0;
+  { let r = 0.055 * S.xp * dt;
+    while (r >= 1 && lootN < 6) { lootN++; r -= 1; }
+    if (_mrng.f() < r) lootN++; }
+  for (let lr = 0; lr < lootN; lr++) {
     const slot = _mrng.i(15);
     let tier = rollTier(_mrng, S.q, rec.skill * 0.25);
     if (tier >= 5) tier = 4;                   // Mythic is awarded, never dropped
@@ -163,10 +170,10 @@ function advanceRec(rec, dt, fast) {
       const bt = recBestTier(rec);
       if (bt > rec.best) {
         rec.best = bt;
-        if (bt === 5) claimMythic(rec);
-        if (!fast && bt >= 4) {
-          chatPush('loot', '[' + rec.n + ']: ' + (bt === 5 ? 'ASCENDANT' : 'Legendary') + ' drop — ' +
-            (bt === 5 ? MYTHIC_NAMES[_mrng.i(MYTHIC_NAMES.length)] : LEGEND_NAMES[_mrng.i(LEGEND_NAMES.length)]) + '!');
+        // (a call to a claimMythic() that never existed lived here -- Mythic seats
+        //  belong to tryAscend alone, and a tier-5 drop cannot roll anyway)
+        if (!fast && bt >= 4 && bt < 5) {
+          chatPush('loot', '[' + rec.n + ']: Legendary drop — ' + LEGEND_NAMES[_mrng.i(LEGEND_NAMES.length)] + '!');
         }
       }
     }
@@ -234,7 +241,13 @@ function tryAscend(who, quiet) {
     SEASON.milestone = metaNow();
     chatPush('world', '\u2554\u2550 ALL ' + MYTHIC_LIMIT + ' ASCENDANT SEATS CLAIMED \u2014 the season ends in ' +
       Math.round(SEASON_GRACE_MS / 60000) + ' minutes \u2550\u2557');
-    if (!quiet) { banner('FINAL ' + Math.round(SEASON_GRACE_MS / 60000) + ' MINUTES', 'Last push \u2014 level and gear crowns are decided now'); sfx('roar', 1); }
+    if (!quiet) {
+      banner('FINAL ' + Math.round(SEASON_GRACE_MS / 60000) + ' MINUTES', 'Last push \u2014 level and gear crowns are decided now'); sfx('roar', 1);
+      // the augury: your odds of walking out of the Overlord, measured by the real model
+      const odds = ovSurvivalOdds();
+      chatPush('sys', 'The augurs cast your fate against the Overlord: you walk away in ' +
+        Math.round(odds * 100) + '% of the tellings. Gear up.');
+    }
   }
   return true;
 }
@@ -286,6 +299,7 @@ function metaOffline(ms) {
     for (let i = 0; i < ROSTER.length; i++) advanceRec(ROSTER[i], realStep, true);
     if ((s % 12) === 0) runClanWar(true);
     if (SEASON.milestone && META_NOW > SEASON.milestone + SEASON_GRACE_MS) break;
+    if (META_NOW > SEASON.start + SEASON_MS) break;   // the 7-day backstop ends the roster's season too
   }
   META_NOW = 0;
   // scatter everyone to sensible places so the world looks lived-in on return
@@ -328,7 +342,7 @@ function runClanWar(quiet) {
   const stake = Math.round(40 + Math.min(pa, pb) * 0.02);
   w.wins++; l.losses++;
   w.respect += stake; l.respect = Math.max(0, l.respect - stake * 0.4);
-  WAR_LOG.unshift({ t: Date.now(), w: w.n, l: l.n, s: stake, wi: w.i, li: l.i });
+  WAR_LOG.unshift({ t: metaNow(), w: w.n, l: l.n, s: stake, wi: w.i, li: l.i });
   if (WAR_LOG.length > 60) WAR_LOG.pop();
   if (!quiet) {
     chatPush('world', '⚑ CLAN WAR — ' + w.n + ' defeated ' + l.n + ' (+' + stake + ' respect)');
@@ -551,7 +565,7 @@ function pickOf(a) { return a[(Math.random() * a.length) | 0]; }
 /** Send gold to an adventurer. They notice, and they remember. */
 function sendGold(rec, amount) {
   const p = G.player;
-  amount = Math.max(1, Math.min(Math.floor(amount), p.gold));
+  amount = Math.min(Math.floor(amount), p.gold);
   if (amount < 1) { toast('You have no gold to send.', 'sys'); sfx('error', .6); return false; }
   p.gold -= amount;
   rec.gold += amount;
@@ -574,7 +588,11 @@ function sendItem(rec, bagIdx) {
   const oldScore = rec.gt[si] ? rec.gi[si] * 1.15 * SLOTS[si].w * RARITY[rec.gt[si] - 1].mult * 2.1 : 0;
   const newScore = it.il * 1.15 * SLOTS[si].w * RARITY[it.t].mult * 2.1;
   let worn = false;
-  if (newScore > oldScore) { rec.gt[si] = it.t + 1; rec.gi[si] = it.il; rec.gs = recGearScore(rec); worn = true; }
+  if (newScore > oldScore) {
+    rec.gt[si] = it.t + 1; rec.gi[si] = it.il; rec.gs = recGearScore(rec); worn = true;
+    const nb = recBestTier(rec);
+    if (nb > rec.best) rec.best = nb;    // or their next own upgrade re-announces your gift as their drop
+  }
   else rec.gold += it.val;
   chatPush('trade', 'You sent [' + it.n + '] to ' + rec.n);
   sfx('coin', 1);
@@ -1113,8 +1131,11 @@ function ovResolve(quiet) {
 /** Mint a relic and hand it to everyone still standing. Idempotent on SEASON.ov.n. */
 function ovAward() {
   const ov = SEASON.ov;
-  if (!ov || ov.ph >= 3) return;
-  ov.ph = 3;
+  /* idempotence keys on its own flag: ph is rewound from 3 to 2 to run the live replay,
+     and gating on ph alone paid the relics a second time on the next boot */
+  if (!ov || ov.paid) return;
+  ov.paid = 1;
+  if (ov.ph < 3) ov.ph = 3;
   if (ov.outcome !== 2) return;                              // wipe and pyrrhic pay nothing
   const rng = new RNG((ov.seed ^ 0x2545F491) | 0);
   if (ov.pAlive) {
@@ -1125,10 +1146,9 @@ function ovAward() {
   /* AI relics are re-granted next season onto roster indices 40+ ONLY. buildRoster gives
      0-39 a skill bonus; relics landing there took 2.25 of the 3 Ascendant seats in testing
      against 0.00 on random indices. Same relics, same count, opposite game. */
-  for (const r of ov.survIdx) {
-    if (ETERNAL.ai.length >= OV.CARRY_MAX) break;
-    ETERNAL.ai.push({ il: eternalIlvl(ov.lvl), s: ov.n });
-  }
+  for (const r of ov.survIdx) ETERNAL.ai.push({ il: eternalIlvl(ov.lvl), s: ov.n });
+  // over the cap, the OLDEST relics pass out of the world -- a full store used to
+  // shut every later season's survivors out entirely
   while (ETERNAL.ai.length > OV.CARRY_MAX) ETERNAL.ai.shift();
 }
 /* ---- the live battle: a replay of a tape that is already written ---- */
@@ -1140,6 +1160,7 @@ let OV_HEADLESS = 0, ovAckT = 0;
 function ovBegin() {
   const ov = SEASON.ov; if (!ov) return;
   const p = G.player;
+  for (const e of G.ents) if (e.rec) e.rec.av = null;   // or those 34 records can never re-instantiate
   G.ents.length = 0; G.proj.length = 0; G.dmg.length = 0; G.target = null; G.inRaid = null;
   p.dead = 0; p.ovDown = 0; p.hp = p.st.hpMax;
   const spot = ovArenaSpot(p.x, p.z);
@@ -1157,6 +1178,7 @@ function ovBegin() {
      and a boom camera left pointing wherever the player last walked shows them a field. */
   G.camYaw = Math.atan2(boss.x - p.x, boss.z - p.z);
   G.camPitch = 0.42; G.camDist = 15;
+  G.target = boss;   // the cast bar lives inside the target frame; without a target it renders to nothing
   banner('THE OVERLORD', 'Kaarnathul, the Unmade');
   chatPush('world', '═══ THE OVERLORD RISES — every adventurer alive stands against it ═══');
   musicSet('boss', true);
@@ -1314,6 +1336,10 @@ function startNewSeason() {
   for (const k in RAID_LOCK) delete RAID_LOCK[k];
   for (const k in BOSS_STATE) delete BOSS_STATE[k];
   TRADE_BOARD.length = 0; WAR_LOG.length = 0;
+  /* open whispers and queued replies reference pre-wipe roster indices; left alive
+     they re-point at whoever the rebuilt roster puts at that index */
+  PENDING.length = 0; CONVO.length = 0;
+  if (typeof AUTO !== 'undefined') { AUTO.reset(); AUTO._snap = null; }
   // reset the player to level 1 with nothing but a plain weapon
   const p = G.player;
   const keepName = p.name, keepCls = p.cls;

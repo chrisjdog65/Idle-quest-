@@ -226,18 +226,20 @@ function vChoir(t, f, d, gain, dest) {
   const c = A.ctx, g = c.createGain(), mixv = c.createGain(); mixv.gain.value = .34;
   const F = [[730, 1090, 2440], [400, 1700, 2300], [640, 1200, 2400]];
   const set = F[(Math.abs(Math.round(f)) % F.length)];
+  // vibrato LFO built first so each harmonic's frequency can actually receive it —
+  // it used to be created after the oscillators and connected to nothing
+  const vib = osc('sine', 4.4, t); const vg = c.createGain(); vg.gain.value = f * .009; vib.connect(vg); vib.start(t); vib.stop(t + d + .9);
   for (const ff of set) {
     const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = fq(ff); bp.Q.value = 7;
     for (const h of [1, 2, 3, 4]) {
       const o = osc(h === 1 ? 'sine' : 'sawtooth', f * h, t, (h - 1) * 4);
       const hg = c.createGain(); hg.gain.value = 1 / (h * h);
-      o.connect(hg); hg.connect(bp); o.start(t); o.stop(t + d + .9);
+      o.connect(hg); hg.connect(bp); vg.connect(o.frequency); o.start(t); o.stop(t + d + .9);
     }
     bp.connect(mixv);
   }
   const n = noiseSrc(t); const nb = c.createBiquadFilter(); nb.type = 'bandpass'; nb.frequency.value = 2400; nb.Q.value = 1.2;
   const ng = c.createGain(); ng.gain.value = .012; n.connect(nb); nb.connect(ng); ng.connect(mixv); n.start(t); n.stop(t + d + .9);
-  const vib = osc('sine', 4.4, t); const vg = c.createGain(); vg.gain.value = f * .009; vib.connect(vg); vib.start(t); vib.stop(t + d + .9);
   env(g, t, .5, .4, .8, .95, d, gain);
   mixv.connect(g); g.connect(dest); sendRev(g, .85);
 }

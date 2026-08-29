@@ -353,9 +353,9 @@ function moveEntity(e, wishX, wishZ, speed, dt, isPlayer) {
   const h = groundH(e.x, e.z);
   const inWater = h < WATER_Y - 0.7 && e.y < WATER_Y;
   const grounded = e.y <= h + 0.06;
-  if (grounded) { e.y = h; if (e.vy < 0) { if (e.vy < -12 && isPlayer) { sfx('land', clamp(-e.vy / 26, .2, 1)); R.camShake = clamp(-e.vy / 40, 0, .5); } e.vy = 0; } }
+  if (grounded) { e.y = h; if (e.vy < 0) { if (e.vy < -12 && isPlayer) { sfx('land', clamp(-e.vy / 26, .2, 1)); G.camShake = clamp(-e.vy / 40, 0, .5); } e.vy = 0; } }
   else e.vy -= 27 * dt;
-  if (inWater) { e.vy += 16 * dt; e.vy *= 0.90; speed *= 0.62; }
+  if (inWater) { e.vy += 16 * dt; e.vy *= Math.pow(0.90, dt * 60); speed *= 0.62; }
 
   const wl = Math.hypot(wishX, wishZ);
   if (wl > 1e-4) {
@@ -385,7 +385,7 @@ function moveEntity(e, wishX, wishZ, speed, dt, isPlayer) {
   e.y += e.vy * dt;
   const nh = groundH(e.x, e.z);
   if (e.y < nh) { e.y = nh; if (e.vy < 0) e.vy = 0; }
-  if (e.y < WATER_Y - 1.2 && nh < WATER_Y - 1.2) e.y = Math.max(e.y, nh);
+  if (e.y < WATER_Y - 1.2 && nh < WATER_Y - 1.2) e.y = Math.max(e.y, WATER_Y - 1.2);
   e.swim = (nh < WATER_Y - 0.9) ? 1 : 0;
   return { grounded: e.y <= nh + 0.06, inWater };
 }
@@ -410,11 +410,24 @@ function dealDamage(src, tgt, amount, kind, noText, splash) {
     const cc = p.st.critP + (kind && kind.crit ? kind.crit : 0);
     if (Math.random() < cc) { dmg *= 2.0 + p.st.mastP * .4; crit = true; }
     if ((p.af.exec || 0) && tgt.hp / tgt.hpMax < .3) dmg *= 1 + p.af.exec * .01;
+    // Opportunist: bonus damage against anything not yet fighting you
+    if ((p.af.oppor || 0) && tgt.isMob && tgt.st !== 'chase') dmg *= 1 + p.af.oppor * .01;
     if (p.surgeT > 0) dmg *= 1.15;
     if (crit && (p.af.surge || 0)) p.surgeT = 4;
   }
+  // boss defensive mechanics, announced in chat and finally real:
+  // a raised shield absorbs most of a hit; a phase shift makes it pass through entirely
+  if ((tgt.phaseT || 0) > 0) { if (!noText) dmgNumber(tgt.x, tgt.y + (tgt.scale || 1) * 1.9, tgt.z, 0, 'shield'); return 0; }
+  if ((tgt.shieldT || 0) > 0) dmg *= 0.3;
   dmg = Math.max(1, Math.round(dmg));
   tgt.hp -= dmg; tgt.hitT = 0.16;
+  // being hit provokes: a mob shot from beyond its aggro radius used to just stand there
+  if (src === p && tgt.isMob && !tgt.dead && tgt.st === 'idle') {
+    tgt.st = 'chase';
+    if (tgt.kind === 'boss') { sfx('roar', 1); banner(tgt.name, tgt.title || 'Boss Encounter'); musicSet('boss'); }
+  }
+  // Chilling: the player's hits slow whatever they land on
+  if (src === p && (p.af.frost || 0) && tgt.isMob) tgt.slowT = Math.max(tgt.slowT || 0, 1 + p.af.frost * .04);
   if (!noText) dmgNumber(tgt.x, tgt.y + (tgt.scale || 1) * 1.9, tgt.z, dmg, crit ? 'crit' : (src === p ? 'dmg' : 'in'));
   if (src === p) {
     p.stats.dmgDone += dmg;
@@ -484,7 +497,7 @@ function castAbility(p, ab, target) {
     if (d > ab.rng + (target.scale || 1) * .8) { sfx('error', .5); return false; }
   }
   if (ab.cast > 0) {
-    p.casting = { ab, target, t: 0, dur: ab.cast / (1 + p.st.hasteP) };
+    p.casting = { ab, target, t: 0, dur: ab.cast / (1 + p.st.hasteP + (p.hasteBuff || 0)) };
     sfx('cast', .6);
     p.an.cast = 1;
     return true;
@@ -494,9 +507,9 @@ function castAbility(p, ab, target) {
 function execAbility(p, ab, target) {
   const c = CLASS_BY[p.cls];
   if (ab.cost > 0) p.res -= ab.cost;
-  if (ab.gen && c.res === 'rage') p.res = Math.min(p.resMax, p.res + ab.gen);
-  p.cds[ab.id] = ab.cd / (1 + p.st.hasteP * .5);
-  if (ab.gcd) p.gcd = ab.gcd / (1 + p.st.hasteP);
+  if (ab.gen) p.res = Math.min(p.resMax, p.res + ab.gen);   // Steady Shot and Sinister Strike authored gen and never received it
+  p.cds[ab.id] = ab.cd / (1 + (p.st.hasteP + (p.hasteBuff || 0)) * .5);
+  if (ab.gcd) p.gcd = ab.gcd / (1 + p.st.hasteP + (p.hasteBuff || 0));
   p.an.atk = 1; p.an.cast = 0;
   const face = target && !target.dead;
   if (face) faceToward(p, target.x, target.z, 1, 60);
@@ -719,7 +732,7 @@ function onMobKilled(m, p) {
     banner('SLAIN', m.name + ', ' + m.title);
     chatPush('kill', p.name + ' has slain ' + m.name + ', ' + m.title + '!');
     R.flash = .7; R.flashCol = [1, .8, .5];
-    R.camShake = .9;
+    G.camShake = .9;
     const loot = rollLoot(p, m.level, bd ? bd.lootTier : 3, 2 + ((Math.random() * 2) | 0));
     for (const it of loot) giveItem(p, it);
     metaBossKilled(p, bd);
@@ -740,6 +753,7 @@ function onMobKilled(m, p) {
 function killPlayer(p) {
   if (p.dead) return;
   p.dead = 1; p.an.dead = 1; p.deaths++;
+  p.casting = null; p.an.cast = 0;
   G.deathT = 0;
   sfx('death', 1);
   R.dmgVig = 1;
@@ -777,6 +791,8 @@ function updateMob(e, dt, p) {
   e.hitT = Math.max(0, e.hitT - dt);
   e.stunT = Math.max(0, (e.stunT || 0) - dt);
   e.rootT = Math.max(0, (e.rootT || 0) - dt);
+  e.shieldT = Math.max(0, (e.shieldT || 0) - dt);
+  e.phaseT = Math.max(0, (e.phaseT || 0) - dt);
   e.slowT = Math.max(0, (e.slowT || 0) - dt);
   e.atkCd = Math.max(0, e.atkCd - dt);
   e.an.atk = Math.max(0, e.an.atk - dt * 2.6);
@@ -881,7 +897,7 @@ function updateBossMechanics(e, dt, p) {
         e.x += nx * (d - 3); e.z += nz * (d - 3); e.y = groundH(e.x, e.z);
         burst(e.x, e.y + 1, e.z, 20, 4, 2, .4, .9, .5, .2, 1, .7);
         applyDamageToPlayer(p, mobDamage(e, p) * 1.5, e);
-        sfx('roar', .7); R.camShake = .6;
+        sfx('roar', .7); G.camShake = .6;
       }
       break;
     }
@@ -915,16 +931,25 @@ function applyDamageToPlayer(p, amount, src) {
   if (p.dead || (p.safeT || 0) > 0) return;
   let dmg = amount * (1 - p.st.drP);
   for (const b of p.buffs) if (b.b.dr) dmg *= (1 - b.b.dr);
+  // Warded: the rune eats one hit's worth of damage every six seconds
+  if ((p.af.ward || 0) && (p.wardCd || 0) <= 0 && dmg > 0) {
+    const ab = Math.min(dmg, p.af.ward);
+    dmg -= ab; p.wardCd = 6;
+    sfx('block', .8);
+    dmgNumber(p.x, p.y + 2.5, p.z, Math.round(ab), 'shield');
+  }
   dmg = Math.max(1, Math.round(dmg));
   p.hp -= dmg;
   p.stats.dmgTaken += dmg;
   dmgNumber(p.x, p.y + 2.2, p.z, dmg, 'in');
   R.dmgVig = Math.min(1, R.dmgVig + dmg / p.st.hpMax * 1.6);
-  R.camShake = Math.min(.6, R.camShake + dmg / p.st.hpMax * 1.2);
+  G.camShake = Math.min(.6, G.camShake + dmg / p.st.hpMax * 1.2);
   if ((p.af.thorns || 0) && src && src.isMob) dealDamage(p, src, dmg * p.af.thorns * .01, null, true, true);
   if (CLASS_BY[p.cls].res === 'rage') p.res = Math.min(p.resMax, p.res + 8);
   G.combat = 6;
-  if (p.hp <= 0) killPlayer(p);
+  // during the finale the tape owns your death: the visual Overlord's real swings
+  // must not kill you ahead of (or instead of) the recorded verdict
+  if (p.hp <= 0) { if (G.overlord && !p.ovDown) p.hp = 1; else killPlayer(p); }
 }
 
 /* ------------------------------ AI ADVENTURER AVATARS ------------------------------ */
@@ -988,6 +1013,14 @@ function updateAIAvatar(e, dt, p) {
         if (e.foe.hp <= 0 && !e.foe.dead) {
           e.foe.dead = 1; e.foe.an.dead = 1; e.foe.deadT = 0;
           burst(e.foe.x, e.foe.y + 1, e.foe.z, 10, 2.4, 2.4, .22, .9, .5, .25, 0, .7);
+          /* without this, a boss slain by the crowd rather than the player skipped the
+             respawn timer and stood back up six seconds later */
+          if (e.foe.kind === 'boss' && e.foe.bossId >= 0) {
+            const bd = DB.bosses[e.foe.bossId];
+            BOSS_STATE[e.foe.bossId] = G.t + (bd ? bd.respawn : 120);
+            chatPush('kill', e.name + ' has slain ' + e.foe.name + (e.foe.title ? ', ' + e.foe.title : '') + '!');
+            if (e.rec) e.rec.bosses++;
+          }
         }
       }
       e.foe.hitT = .16;
@@ -995,7 +1028,10 @@ function updateAIAvatar(e, dt, p) {
       burst(e.foe.x, e.foe.y + 1, e.foe.z, 4, 1.8, 2, .16, .8, .8, .95, 1, .4);
     }
     faceToward(e, e.foe.x, e.foe.z, dt, 8);
+    const ha = clamp(angDelta(e.yaw, Math.atan2(e.foe.x - e.x, e.foe.z - e.z)), -.65, .65);
+    e.headYaw = (e.headYaw || 0) + (ha - (e.headYaw || 0)) * Math.min(1, dt * 7);
   } else {
+    e.headYaw = (e.headYaw || 0) * Math.max(0, 1 - dt * 4);
     if (!e.dest || V.dist2(e.x, e.z, e.dest[0], e.dest[1]) < 36) {
       e.dest = [rec.tx, rec.tz];
       if (Math.random() < .25) {
@@ -1029,7 +1065,7 @@ function updateSpawns(dt, p) {
     const d = V.dist(e.x, e.z, p.x, p.z);
     if (d > 260) {
       if (e.kind === 'boss') { if (d > 320) { e.remove = 1; } }
-      else { if (e.rec) e.rec.av = null; G.ents.splice(i, 1); continue; }
+      else { e.dead = 1; if (e.rec) e.rec.av = null; G.ents.splice(i, 1); continue; }
     }
     if (e.isMob) mobs++; else if (e.kind === 'ai') ais++;
   }
@@ -1233,12 +1269,19 @@ function updatePlayer(dt, input) {
     if (b.b.dmg) p.buffDmg += b.b.dmg;
     if (b.b.hst) hasteBuff += b.b.hst;
   }
+  // Frenzied: attack speed rises when the wearer is below half health
+  if ((p.af.rage || 0) && p.hp < p.st.hpMax * .5) hasteBuff += p.af.rage * .01;
+  /* Every haste cooldown in the class tables funnelled into this local and was then
+     thrown away -- Avenging Wrath, Rapid Fire, Adrenaline Rush and Incarnation did
+     nothing. Consumers read p.st.hasteP + p.hasteBuff now. */
+  p.hasteBuff = hasteBuff;
+  p.wardCd = Math.max(0, (p.wardCd || 0) - dt);
   if (p.hot) { p.hot.t -= dt; healEntity(p, p.hot.m * dt, true); if (p.hot.t <= 0) p.hot = null; }
   tickDots(p, dt);
-  if (p.hp <= 0) { killPlayer(p); return; }
+  if (p.hp <= 0) { if (G.overlord && !p.ovDown) p.hp = 1; else { killPlayer(p); return; } }
 
   // resource regen
-  if (c.res === 'energy') p.res = Math.min(p.resMax, p.res + 13 * dt * (1 + p.st.hasteP));
+  if (c.res === 'energy') p.res = Math.min(p.resMax, p.res + 13 * dt * (1 + p.st.hasteP + (p.hasteBuff || 0)));
   else if (c.res === 'mana') p.res = Math.min(p.resMax, p.res + p.resMax * 0.045 * dt * (G.combat > 0 ? .5 : 2.2));
   else if (G.combat <= 0) p.res = Math.max(0, p.res - 6 * dt);
 
@@ -1284,11 +1327,13 @@ function updatePlayer(dt, input) {
     const d = V.dist(p.x, p.z, t.x, t.z);
     const auto = c.ab.find(a => a.auto);
     if (d <= auto.rng + (t.scale || 1) * .8 && p.autoAttack !== false) {
-      p.aaT = (p.aaT || 0) - dt * (1 + p.st.hasteP);
+      p.aaT = (p.aaT || 0) - dt * (1 + p.st.hasteP + (p.hasteBuff || 0));
       if (p.aaT <= 0) { p.aaT = 1.9; if (p.gcd <= 0) { castAbility(p, auto, t); G.combat = 6; } }
     }
   }
   if (t && (t.dead || V.dist(p.x, p.z, t.x, t.z) > 78)) G.target = null;
+  const hw = G.target && !G.target.dead ? clamp(angDelta(p.yaw, Math.atan2(G.target.x - p.x, G.target.z - p.z)), -.65, .65) : 0;
+  p.headYaw = (p.headYaw || 0) + (hw - (p.headYaw || 0)) * Math.min(1, dt * 7);
 
   // zone tracking
   const zn = zoneAt(p.x, p.z);
@@ -1314,7 +1359,11 @@ function updatePlayer(dt, input) {
   }
   G.indoorT += dt;
   const ruin = nearestPOI(p.x, p.z, 'ruins', 22);
-  if (ruin) questProgress(p, 'explore', ruin.n, 1);
+  if (ruin) {
+    questProgress(p, 'explore', ruin.n, 1);
+    // escort quests had no completion path at all: 58 of the 660 could never be finished
+    questProgress(p, 'escort', ruin.n, 1);
+  }
 }
 
 /* ------------------------------ WORLD TICK ------------------------------ */
@@ -1325,14 +1374,15 @@ function updateWorld(dt) {
     const g = G.gfx[i];
     g.t += dt;
     if (g.tele) {
-      if ((R.frame + i) % 2 === 0) {
+      if (Math.random() < dt * 30) {
         const a = Math.random() * TAU, r = g.r * Math.sqrt(Math.random());
         spawnPart(g.x + Math.cos(a) * r, g.y + .1, g.z + Math.sin(a) * r, 0, .5, 0, .4, .22, g.col[0], g.col[1], g.col[2], .8, 0, 0, 0);
       }
       if (g.t >= g.dur) {
         if (V.dist2(p.x, p.z, g.x, g.z) < g.r * g.r) applyDamageToPlayer(p, g.dmg, g.src);
         burst(g.x, g.y + .3, g.z, 30, g.r * .7, 5, .5, g.col[0], g.col[1], g.col[2], 0, 1);
-        sfx('fire', .9); R.camShake = .4;
+        spawnPart(g.x, g.y + .35, g.z, 0, 0, 0, .55, g.r * .8, g.col[0], g.col[1], g.col[2], .9, 2, 0, 0);
+        sfx('fire', .9); G.camShake = .4;
         G.gfx.splice(i, 1); continue;
       }
     } else if (g.t >= g.dur) { G.gfx.splice(i, 1); continue; }

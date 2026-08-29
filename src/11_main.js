@@ -16,7 +16,8 @@ function packRoster() {
       r.gt.join(','), r.gi.join(','), r.g, r.st, +r.skill.toFixed(3),
       Math.round(r.x), Math.round(r.z), Math.round(r.respect), Math.round(r.kills),
       Math.round(r.quests), Math.round(r.bosses), Math.round(r.raids), r.deaths, r.best,
-      r.title, r.sk, r.hr, r.z2, r.pvp, +(r.gen || .5).toFixed(3), +(r.rel || 0).toFixed(3)]);
+      r.title, r.sk, r.hr, r.z2, r.pvp, +(r.gen || .5).toFixed(3), +(r.rel || 0).toFixed(3),
+      r.asked || 0]);
   }
   return out;
 }
@@ -31,7 +32,7 @@ function unpackRoster(arr) {
       x: a[11], z: a[12], tx: a[11], tz: a[12],
       respect: a[13], kills: a[14], quests: a[15], bosses: a[16], raids: a[17],
       deaths: a[18], best: a[19], title: a[20], sk: a[21], hr: a[22], z2: a[23], pvp: a[24] || 0,
-      gen: a[25] == null ? .5 : a[25], rel: a[26] || 0, asked: 0,
+      gen: a[25] == null ? .5 : a[25], rel: a[26] || 0, asked: a[27] || 0,
       av: null, online: 1, hof: 0, mythicAt: 0,
     });
   }
@@ -48,9 +49,10 @@ function unpackGuilds(arr) {
 }
 function saveGame() {
   const p = G.player; if (!p) return;
+  if (G.wiping) return;   // the settings wipe races the unload/visibility saves and used to lose
   try {
     const data = {
-      v: 1, ts: Date.now(),
+      v: 1, ts: Date.now(), tod: G.tod,
       season: { num: SEASON.num, start: SEASON.start, ended: SEASON.ended, champions: SEASON.champions,
         milestone: SEASON.milestone, ascended: SEASON.ascended, ov: SEASON.ov },
       mythic: Array.from(MYTHIC_HOLDERS),
@@ -93,6 +95,8 @@ function applySave(d) {
   Object.assign(RAID_LOCK, d.lock || {});
   WAR_LOG.length = 0; (d.wars || []).forEach(w => WAR_LOG.push(w));
   ITEM_UID = d.uid || 1;
+  if (d.tod != null) G.tod = d.tod;                    // the day/night cycle reset to 07:12 on every reload
+  audioSetVol(SET.volm, SET.vols);   // the buses were ramped from defaults before the save loaded
   const s = d.p;
   const p = makePlayer(s.n, s.c);
   p.level = s.lv; p.xp = s.xp; p.gold = s.gold;
@@ -115,9 +119,18 @@ function applySave(d) {
 /* metaOffline stops the roster dead at the grace deadline, but playerOffline advanced
    the player for the FULL absence — so a returning player arrived at their own finale
    having grown for hours the rest of the world did not get. Clamp both to the same cutoff. */
+/** When this season actually ends/ended, in real epoch ms. */
+function ovSeasonEndTs() {
+  const byClock = SEASON.start + SEASON_MS;
+  return SEASON.milestone ? Math.min(byClock, SEASON.milestone + SEASON_GRACE_MS) : byClock;
+}
 function playerOffline0(ms) {
-  const left = seasonLeft();
-  return playerOffline(left > 0 ? Math.min(ms, left) : Math.min(ms, 60000));
+  /* seasonLeft() clamps at zero, so the old version credited at most 60s once the season
+     had ended -- and worse, when it had NOT ended it clamped a long absence to the time
+     remaining measured at RETURN, double-counting the absence itself. Credit exactly the
+     slice of the absence that lay inside the season. */
+  const t0 = Date.now() - ms;
+  return playerOffline(Math.max(0, Math.min(ms, ovSeasonEndTs() - t0)));
 }
 function playerOffline(ms) {
   const p = G.player;
@@ -163,7 +176,7 @@ function playerOffline(ms) {
     p.stats.raidsDone += 0.0042 * realStep * EFF * 0.09;
     p.respect += 0.06 * (1 + p.level / 90) * realStep * EFF;
   }
-  p.gold = Math.round(p.gold);
+  p.gold = Math.round(p.gold); p.kills = Math.round(p.kills);
   p.doneCount = Math.round(p.doneCount); p.bossKills = Math.round(p.bossKills);
   p.stats.raidsDone = Math.round(p.stats.raidsDone);
   p.stats.questsDone = p.doneCount; p.stats.bossesKilled = p.bossKills;
@@ -306,7 +319,7 @@ async function startGame(saved) {
     // ---- offline catch-up ----
     const elapsed = Math.max(0, Date.now() - lastTs);
     let ovDone = [];
-    if (saved && elapsed > 20000) {
+    if (saved && elapsed > 20000 && !ovIsActive()) {
       const mine = playerOffline0(elapsed);
       ovDone = ovCatchUp(elapsed);
       showWelcomeBack(elapsed, mine, ovDone);
@@ -321,8 +334,16 @@ async function startGame(saved) {
     setInterval(() => { if (G.started) saveGame(); }, 20000);
     window.addEventListener('beforeunload', () => saveGame());
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) { saveGame(); }
-      else { audioResume(); lastFrame = performance.now(); }
+      if (document.hidden) { lastHideTs = Date.now(); saveGame(); }
+      else {
+        audioResume(); lastFrame = performance.now();
+        const hid = lastHideTs ? Date.now() - lastHideTs : 0;
+        lastHideTs = 0;
+        /* rAF throttles a hidden tab to nothing, so that time used to be unearnable.
+           Credit it like a closed tab. 60s floor = playerOffline's own minimum, so
+           ordinary tab-flips cost nothing. */
+        if (hid > 60000 && !ovIsActive()) { metaOffline(hid); playerOffline0(hid); }
+      }
     });
   } catch (e) {
     console.error(e);
@@ -338,17 +359,30 @@ async function startGame(saved) {
    whole run of them on return. Bounded, or a month away simulates forever. */
 function ovCatchUp(elapsed) {
   const done = [];
-  let left = elapsed, guard = 0;
-  while (left > 20000 && guard++ < OV.CATCHUP_MAX) {
-    metaOffline(left);                                  // stops dead at the grace deadline
-    if (seasonLeft() > 0) break;                        // this season has not actually ended
-    const before = SEASON.num;
-    endSeason(true);                                    // resolves the Overlord, quietly
-    done.push({ num: before, ov: SEASON.ov });
-    const span = Math.max(60000, Date.now() - SEASON.start);
-    left -= span;
-    if (left > 20000) { SEASON.start = Date.now() - Math.max(0, left); ovStartNextSeason(); }
-  }
+  /* a saved, unacknowledged verdict freezes the world exactly as metaTick does live --
+     advancing the roster under it would leave the survivor list contradicting the board */
+  if (ovIsActive()) return done;
+  let guard = 0;
+  OV_HEADLESS = 1;
+  try {
+    while (elapsed > 20000 && guard++ < OV.CATCHUP_MAX) {
+      metaOffline(elapsed);                             // stops dead at the season's deadline
+      if (seasonLeft() > 0) break;                      // this season never actually ended
+      const endTs = ovSeasonEndTs();                    // when, in real time, it DID end
+      const before = SEASON.num;
+      endSeason(true);                                  // resolves and pays the Overlord, quietly
+      done.push({ num: before, ov: SEASON.ov });
+      /* the old code subtracted the season's whole age (always >= the absence), went
+         negative on iteration one, and could never resolve a second season */
+      elapsed = Math.max(0, Date.now() - endTs);
+      if (elapsed > 20000) {
+        ovStartNextSeason();
+        SEASON.start = Date.now() - elapsed;            // the new season began when the old one ended
+      }
+    }
+    // the tail of the absence belongs to the season that is now open
+    if (done.length && elapsed > 60000 && seasonLeft() > 0) playerOffline0(elapsed);
+  } finally { OV_HEADLESS = 0; }
   return done;
 }
 /* A verdict can exist without ever having been paid or shown — the tab closed between
@@ -358,7 +392,7 @@ function ovCatchUp(elapsed) {
 function ovBootRecover() {
   const ov = SEASON.ov;
   if (!ov || ov.n !== SEASON.num) return;
-  if (ov.ph < 3) ovAward();
+  ovAward();                     // safe: idempotent on ov.paid, and ph alone lies after a replay rewind
   if (ov.ph < 5) { ov.ph = 4; showSeasonEnd(SEASON.champions[0]); }
 }
 function showWelcomeBack(ms, mine, ovDone) {
@@ -400,7 +434,7 @@ function showWelcomeBack(ms, mine, ovDone) {
 }
 
 /* ------------------------------ MAIN LOOP ------------------------------ */
-let lastFrame = 0, fpsAcc = 0, fpsN = 0, autoSampleT = 0;
+let lastFrame = 0, fpsAcc = 0, fpsN = 0, autoSampleT = 0, lastHideTs = 0;
 function loop(ts) {
   requestAnimationFrame(loop);
   if (!G.started || R.lost) return;
@@ -468,6 +502,14 @@ function loop(ts) {
     // live leaderboards refresh while you watch them
     if ($('ptabs').firstChild && $('ptabs').firstChild.dataset.act !== 'back') renderPanel();
   }
+  /* the dirty flags finally have readers: an open bag repaints when auto-play equips or
+     sells underneath it, the quest log when progress ticks, and anything on a season event */
+  if (PANEL && !PANEL_MODAL) {
+    if ((uiDirty.bag && PANEL === 'bag') || (uiDirty.quests && PANEL === 'quest') || uiDirty.all) {
+      renderPanel();
+      uiDirty.bag = 0; uiDirty.quests = 0; uiDirty.all = 0;
+    }
+  } else { uiDirty.bag = 0; uiDirty.quests = 0; uiDirty.all = 0; }
   if (PANEL === 'map' && $('bigmap')) drawBigMap();
 }
 

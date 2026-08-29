@@ -37,7 +37,7 @@ class RNG {
   pick(arr) { return arr[(this._f() * arr.length) | 0]; }
   chance(p) { return this._f() < p; }
   /** Box-Muller-ish cheap gaussian, mean 0 sd 1 */
-  g() { return (this._f() + this._f() + this._f() + this._f() + this._f() + this._f() - 3) * 0.7071; }
+  g() { return (this._f() + this._f() + this._f() + this._f() + this._f() + this._f() - 3) * 1.4142; }
   shuffle(arr) { for (let i = arr.length - 1; i > 0; i--) { const j = (this._f() * (i + 1)) | 0; const t = arr[i]; arr[i] = arr[j]; arr[j] = t; } return arr; }
   /** weighted pick: weights array of numbers */
   wpick(items, weights) {
@@ -186,7 +186,10 @@ function fmt(n) {
   if (n < 1000) return '' + n;
   let i = 0; let v = n;
   while (v >= 1000 && i < NUMSUF.length - 1) { v /= 1000; i++; }
-  return (v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)) + NUMSUF[i];
+  let t = v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2);
+  // toFixed can round 999.5 up to "1000" without promoting the suffix -> "1000K"
+  if (parseFloat(t) >= 1000 && i < NUMSUF.length - 1) { v /= 1000; i++; t = v.toFixed(2); }
+  return t + NUMSUF[i];
 }
 function fmtGold(n) { return fmt(n) + 'g'; }
 function pad2(n) { return n < 10 ? '0' + n : '' + n; }
