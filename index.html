@@ -304,7 +304,7 @@ h4.sec:first-child{margin-top:2px}
   #interact{bottom:calc(250px + var(--sab))}
   #chat{bottom:calc(258px + var(--sab));width:min(74vw,320px)}
   #stick{bottom:calc(56px + var(--sab))}
-  #bar .mb{width:34px}
+  #bar .mb{width:31px;font-size:15px}
   #tracker{top:calc(178px + var(--sat));max-height:min(26vh,calc(100vh - var(--sab) - var(--sat) - 470px))}
   /* a centred target frame collides with the portrait frame and the minimap,
      so stack it under the player frame instead */
@@ -375,6 +375,7 @@ h4.sec:first-child{margin-top:2px}
     <div class="mb" data-p="guild">⚑<span class="dot"></span></div>
     <div class="mb" data-p="raid">🐉<span class="dot"></span></div>
     <div class="mb" data-p="hof">🏆<span class="dot"></span></div>
+    <div class="mb" data-p="ach">★<span class="dot"></span></div>
     <div class="mb" data-p="social">👥<span class="dot"></span></div>
     <div class="mb" data-p="opts">⚙<span class="dot"></span></div>
   </div>
@@ -1928,6 +1929,446 @@ function gearScoreOf(gear) {
   return Math.round(s);
 }
 function bestTierOf(gear) { let t = -1; for (const k of SLOT_KEYS) { const it = gear[k]; if (it && it.t > t) t = it.t; } return t; }
+
+/* ============================================================================
+   ACHIEVEMENTS — 250 of them, and they are the only thing in this world that
+   never resets. Gear dies with its season. Levels die with its season. What you
+   have DONE is kept, for you and for all thousand of them, forever.
+
+   Everything here is measured against a lifetime ledger (`lf` on a roster
+   record, `life` on the player) which banks the season's counters at every
+   wipe. An achievement is a threshold on one of those numbers, so a single
+   comparison decides it for a player and for an AI alike -- which is what lets
+   the board be honest about a thousand people at once.
+   ============================================================================ */
+
+const ACH_CATS = [
+  { k: 'slay',  n: 'Slayer',    c: '#e0654a', d: 'Blood spilled, in bulk.' },
+  { k: 'quest', n: 'Wayfarer',  c: '#6fc46a', d: 'Errands run and roads walked.' },
+  { k: 'bane',  n: 'Bane',      c: '#e04a7a', d: 'World bosses put in the ground.' },
+  { k: 'raid',  n: 'Raider',    c: '#b45ef0', d: 'Doors opened by a full warband.' },
+  { k: 'coin',  n: 'Fortune',   c: '#f0c257', d: 'Gold earned, hoarded and handed away.' },
+  { k: 'loot',  n: 'Collector', c: '#4aa3f0', d: 'What the drop tables owed you.' },
+  { k: 'climb', n: 'Ascendant', c: '#f09a3c', d: 'The long climb, season after season.' },
+  { k: 'clan',  n: 'Warband',   c: '#5ee0d0', d: 'What you were worth to a clan.' },
+  { k: 'legend',n: 'Legend',    c: '#ffd76a', d: 'Crowns, firsts and finales.' },
+  { k: 'roam',  n: 'Wanderer',  c: '#9fb4c8', d: 'Ground covered and punishment taken.' },
+];
+const ACH_CAT_BY = {}; ACH_CATS.forEach((c, i) => { ACH_CAT_BY[c.k] = c; c.idx = i; });
+
+/* How a threshold reads as English, per tracked stat. %n is the number. */
+const ACH_VERB = {
+  kills:  'Slay %n monsters',
+  quests: 'Complete %n quests',
+  bosses: 'Kill %n world bosses',
+  raids:  'Clear %n raids',
+  deaths: 'Die %n times',
+  pvp:    'Win %n duels',
+  earn:   'Earn %n gold across your lifetime',
+  purse:  'Hold %n gold at once',
+  given:  'Give away %n gold',
+  passed: 'Sell, trade or give away %n pieces of gear',
+  items:  'Find %n items',
+  rare:   'Find %n Rare or better items',
+  epic:   'Find %n Epic or better items',
+  legend: 'Find %n Legendary items',
+  lv:     'Reach level %n',
+  maxLv:  'Reach level %n',
+  maxGs:  'Reach %n gear score',
+  seasons:'Play %n seasons',
+  asc:    'Ascend to level 200 %n times',
+  sets:   'Earn %n Mythic sets',
+  ov:     'Stand in %n Overlord finales',
+  ovWin:  'Survive the Overlord %n times',
+  relics: 'Hold %n Eternal relics',
+  firsts: 'Take first blood on %n world bosses',
+  crowns: 'Be crowned champion %n times',
+  gcrowns:'Finish %n seasons in one of the ten best clans',
+  blaze:  'Take the Trailblazer crown %n times',
+  achCr:  'Take the Achievement crown %n times',
+  top10:  'Finish a season in the top ten %n times',
+  top100: 'Finish a season in the top hundred %n times',
+  respect:'Earn %n respect',
+  wars:   'Win %n clan wars',
+  dist:   'Travel %n metres',
+  zones:  'Set foot in %n of the world\'s regions',
+  hours:  'Adventure for %n hours',
+  guildLead: 'Be your clan\'s top earner %n times',
+};
+
+/* ---------------------------------------------------------------------------
+   The table. [name, stat, threshold] -- 25 per category, 250 in all.
+   Thresholds are set from a measured season (see the pacing note at the foot of
+   this file): the top rung of each ladder is about five seasons of that
+   activity for somebody good at it, and the rungs below are spaced so every
+   season pays out a steady handful rather than one late avalanche.
+   --------------------------------------------------------------------------- */
+const ACH_RAW = {
+  slay: [
+    ['First Blood on the Boots', 'kills', 25],
+    ['Something to Tell the Camp', 'kills', 100],
+    ['A Working Sword Arm', 'kills', 300],
+    ['The Culling Begins', 'kills', 700],
+    ['Red Ledger', 'kills', 1300],
+    ['Butcher of the Barrows', 'kills', 2100],
+    ['Nothing Left Standing', 'kills', 3100],
+    ['The Long Harvest', 'kills', 4300],
+    ['Blade and Bone', 'kills', 5600],
+    ['Slaughterwright', 'kills', 7000],
+    ['The Field Does Not Empty', 'kills', 8600],
+    ['Grinder of Ages', 'kills', 10300],
+    ['Blade Without Bottom', 'kills', 12100],
+    ['Ruin Walks Beside You', 'kills', 14000],
+    ['The Last Argument', 'kills', 16000],
+    ['Death Has an Understudy', 'kills', 18100],
+    ['Twenty Thousand Quiet Fields', 'kills', 20300],
+    ['The Reaper Takes Notes', 'kills', 22600],
+    ['Attrition Incarnate', 'kills', 24500],
+    ['A World Made Quieter', 'kills', 26400],
+    ['Nothing Personal', 'kills', 28200],
+    ['The Ledger Runs Out of Pages', 'kills', 29900],
+    ['Extinction Event', 'kills', 31200],
+    ['The Silence After', 'kills', 32200],
+    ['They Stopped Counting', 'kills', 33000],
+  ],
+  quest: [
+    ['Errand Runner', 'quests', 3],
+    ['Reliable Sort', 'quests', 12],
+    ['Ask For Them By Name', 'quests', 30],
+    ['The Notice Board Regular', 'quests', 60],
+    ['Every Village Knows You', 'quests', 100],
+    ['Problem Solver', 'quests', 150],
+    ['The Fixer', 'quests', 205],
+    ['Debt of Favours', 'quests', 265],
+    ['A Hundred Small Kindnesses', 'quests', 330],
+    ['The Realm\'s Errand Runner', 'quests', 400],
+    ['No Job Too Small', 'quests', 470],
+    ['The Board Is Empty', 'quests', 545],
+    ['They Queue For You', 'quests', 620],
+    ['Contract Closed', 'quests', 695],
+    ['The Guild Sends You First', 'quests', 770],
+    ['Answerer of Prayers', 'quests', 845],
+    ['A Thousand Errands', 'quests', 915],
+    ['The Realm Owes You', 'quests', 985],
+    ['Every Door Is Open', 'quests', 1050],
+    ['The Name on Every Scroll', 'quests', 1110],
+    ['Legend of the Notice Board', 'quests', 1165],
+    ['Nothing Goes Unfinished', 'quests', 1215],
+    ['The Work Is Never Done', 'quests', 1265],
+    ['Errand of Ages', 'quests', 1310],
+    ['The Realm Has Nothing Left To Ask', 'quests', 1350],
+  ],
+  bane: [
+    ['Punched Above Your Weight', 'bosses', 1],
+    ['Lair Cleared', 'bosses', 2],
+    ['Trophy Wall', 'bosses', 4],
+    ['The Big Ones', 'bosses', 6],
+    ['Boss Killer', 'bosses', 9],
+    ['Bane of the Deep Places', 'bosses', 12],
+    ['They Know Your Banner', 'bosses', 16],
+    ['Crowns Broken', 'bosses', 20],
+    ['Lairbreaker', 'bosses', 24],
+    ['The Beast Roll', 'bosses', 29],
+    ['Nothing Sleeps Safely', 'bosses', 34],
+    ['Monster Hunter Emeritus', 'bosses', 39],
+    ['The Deep Places Empty', 'bosses', 45],
+    ['Bane Absolute', 'bosses', 51],
+    ['Terror of Terrors', 'bosses', 57],
+    ['A Roll of Broken Beasts', 'bosses', 63],
+    ['The Bestiary Thins', 'bosses', 69],
+    ['They Flee the Sound of You', 'bosses', 75],
+    ['Nothing Wakes That You Do Not Kill', 'bosses', 81],
+    ['The Deep Has Nothing Left', 'bosses', 82],
+    ['Slayer of the Named', 'bosses', 86],
+    ['Ninety Great Beasts', 'bosses', 90],
+    ['First to the Gate', 'firsts', 1],
+    ['Twice There First', 'firsts', 2],
+    ['Three Doors Kicked In', 'firsts', 3],
+  ],
+  raid: [
+    ['You Answered the Call', 'raids', 1],
+    ['Warm Body in the Back', 'raids', 2],
+    ['Regular Roster Spot', 'raids', 3],
+    ['The Clan Waits For You', 'raids', 5],
+    ['Raid Leader Material', 'raids', 7],
+    ['Wipe It and Pull Again', 'raids', 9],
+    ['One More Pull', 'raids', 11],
+    ['The Gate Opens For You', 'raids', 13],
+    ['Veteran of the Deep Raids', 'raids', 15],
+    ['Every Wing Cleared', 'raids', 17],
+    ['Raidwright', 'raids', 19],
+    ['The Doors Know Your Knock', 'raids', 21],
+    ['A Hundred Wipes, A Hundred Clears', 'raids', 23],
+    ['The Long Night Shift', 'raids', 25],
+    ['Never Missed a Muster', 'raids', 27],
+    ['The Warband Is You', 'raids', 29],
+    ['Clearer of All Things', 'raids', 31],
+    ['Raid Night Eternal', 'raids', 32],
+    ['The Last Door', 'raids', 34],
+    ['You Stood Before the Overlord', 'ov', 1],
+    ['Twice Into the Dark', 'ov', 2],
+    ['Three Finales', 'ov', 3],
+    ['Four Times to the Edge', 'ov', 4],
+    ['Five Times You Faced the End', 'ov', 5],
+    ['You Walked Out of the Finale', 'ovWin', 1],
+  ],
+  coin: [
+    ['Copper in the Pocket', 'earn', 500],
+    ['Pays For the Round', 'earn', 4000],
+    ['Comfortable', 'earn', 20000],
+    ['Purse Full of Silver', 'earn', 70000],
+    ['Merchant\'s Friend', 'earn', 180000],
+    ['Small Fortune', 'earn', 380000],
+    ['Coin Counter', 'earn', 680000],
+    ['The Bank Knows You', 'earn', 1050000],
+    ['Gold-Bloated', 'earn', 1500000],
+    ['Vaultbreaker', 'earn', 2050000],
+    ['The Realm\'s Richest Hands', 'earn', 2650000],
+    ['Dragon-Hoard Money', 'earn', 3300000],
+    ['You Could Buy a Zone', 'earn', 3950000],
+    ['The Economy Rounds To You', 'earn', 4500000],
+    ['A Thousand in Hand', 'purse', 1000],
+    ['Heavy Pockets', 'purse', 25000],
+    ['Walking Treasury', 'purse', 120000],
+    ['Do Not Get Robbed', 'purse', 380000],
+    ['The Hoard Rides With You', 'purse', 700000],
+    ['A Coin For a Stranger', 'given', 250],
+    ['Open Hand', 'given', 3000],
+    ['Patron of Strangers', 'given', 30000],
+    ['One For You', 'passed', 10],
+    ['Quartermaster', 'passed', 200],
+    ['It All Moves On', 'passed', 500],
+  ],
+  loot: [
+    ['It Dropped Something', 'items', 20],
+    ['Full Bags', 'items', 120],
+    ['Packrat', 'items', 320],
+    ['The Vendor Sighs', 'items', 600],
+    ['Everything Sparkles', 'items', 900],
+    ['Loot Goblin', 'items', 1200],
+    ['Drop Table Devotee', 'items', 1500],
+    ['One of Everything', 'items', 1780],
+    ['The Hoard Grows', 'items', 1930],
+    ['Nothing Left in the Tables', 'items', 2020],
+    ['Something Blue', 'rare', 15],
+    ['Blue Streak', 'rare', 90],
+    ['Rare Is Not the Word', 'rare', 220],
+    ['Common as Rare', 'rare', 380],
+    ['The Uncommon Ordinary', 'rare', 485],
+    ['Purple Day', 'epic', 5],
+    ['Epic Habit', 'epic', 30],
+    ['Fistful of Epics', 'epic', 70],
+    ['Purple Rain', 'epic', 120],
+    ['Epic Is Your Baseline', 'epic', 175],
+    ['Orange Text', 'legend', 1],
+    ['Twice Blessed', 'legend', 3],
+    ['Legendary Streak', 'legend', 6],
+    ['The Drop Gods Owe You Nothing', 'legend', 9],
+    ['Clad in Orange', 'legend', 13],
+  ],
+  climb: [
+    ['Out of the Starting Field', 'maxLv', 10],
+    ['Past the First Zone', 'maxLv', 25],
+    ['Getting Somewhere', 'maxLv', 45],
+    ['Halfway to Nowhere', 'maxLv', 70],
+    ['The Upper Zones', 'maxLv', 100],
+    ['Rarefied Air', 'maxLv', 130],
+    ['The Long Grind', 'maxLv', 160],
+    ['In Sight of Two Hundred', 'maxLv', 185],
+    ['ASCENDANT', 'maxLv', 200],
+    ['Geared', 'maxGs', 3000],
+    ['Well Geared', 'maxGs', 10000],
+    ['Sharply Dressed', 'maxGs', 22000],
+    ['Walking Armoury', 'maxGs', 38000],
+    ['Gear Score Is a Lifestyle', 'maxGs', 55000],
+    ['Dressed Like a Champion', 'maxGs', 75000],
+    ['The Best Kit in the World', 'maxGs', 92000],
+    ['One Season In', 'seasons', 1],
+    ['Twice Around', 'seasons', 2],
+    ['Third Verse', 'seasons', 3],
+    ['Four Worlds Deep', 'seasons', 4],
+    ['Five Wipes Survived', 'seasons', 5],
+    ['Ascended Once', 'asc', 1],
+    ['Ascended Again', 'asc', 2],
+    ['Clad in Mythic', 'sets', 1],
+    ['The Forge Knows Your Measurements', 'sets', 3],
+  ],
+  clan: [
+    ['Signed the Charter', 'respect', 100],
+    ['Pulling Your Weight', 'respect', 800],
+    ['Named in the Roster', 'respect', 2200],
+    ['Officer Material', 'respect', 3800],
+    ['The Clan\'s Backbone', 'respect', 5400],
+    ['Respect Is Earned', 'respect', 6800],
+    ['The Banner Is Yours', 'respect', 8000],
+    ['Warband Legend', 'respect', 9000],
+    ['They Vote How You Vote', 'respect', 9800],
+    ['Respect Without Ceiling', 'respect', 10500],
+    ['The Roster Is Yours', 'respect', 11200],
+    ['First War', 'wars', 1],
+    ['Bloodied Banner', 'wars', 2],
+    ['War Is the Point', 'wars', 3],
+    ['Top of the Roster', 'guildLead', 1],
+    ['Carried the Clan', 'guildLead', 2],
+    ['First Duel', 'pvp', 1],
+    ['Duellist', 'pvp', 2],
+    ['Blade for Hire', 'pvp', 3],
+    ['Nobody Wants the Fight', 'pvp', 4],
+    ['Hands Down the Best', 'pvp', 5],
+    ['Undisputed', 'pvp', 7],
+    ['They Stopped Challenging', 'pvp', 9],
+    ['Nobody Left Who Will Draw', 'pvp', 11],
+    ['Champion of the Duelling Ground', 'pvp', 12],
+  ],
+  legend: [
+    ['Named in the Hall', 'top100', 1],
+    ['A Regular in the Hundred', 'top100', 2],
+    ['Three Halls, One Name', 'top100', 3],
+    ['Never Out of the Hundred', 'top100', 4],
+    ['The Hundred Is a Formality', 'top100', 5],
+    ['Top Ten', 'top10', 1],
+    ['Top Ten Again', 'top10', 2],
+    ['Three Times at the Summit', 'top10', 3],
+    ['Permanently Top Ten', 'top10', 4],
+    ['A Fixture at the Summit', 'top10', 5],
+    ['CROWNED', 'crowns', 1],
+    ['Twice Crowned', 'crowns', 2],
+    ['Relic-Bearer', 'relics', 1],
+    ['The Long Service', 'hours', 24],
+    ['The Unclaimed Grow Few', 'firsts', 4],
+    ['Thrice Ascendant', 'asc', 3],
+    ['Four Times to Two Hundred', 'asc', 4],
+    ['Five Times to Two Hundred', 'asc', 5],
+    ['Four Mythic Forgings', 'sets', 4],
+    ['Five Mythic Forgings', 'sets', 5],
+    ['Three Seasons Carrying Them', 'guildLead', 3],
+    ['Four Seasons Carrying Them', 'guildLead', 4],
+    ['Four Wars Won', 'wars', 4],
+    ['The Realm Answers to You', 'respect', 11800],
+    ['The Finest Kit the World Has Made', 'maxGs', 96000],
+  ],
+  roam: [
+    ['Off the Road', 'dist', 2000],
+    ['Long Walk', 'dist', 12000],
+    ['Boots Worn Through', 'dist', 35000],
+    ['Cross-Country', 'dist', 70000],
+    ['The Continent, End to End', 'dist', 110000],
+    ['You Have Walked a World', 'dist', 155000],
+    ['Wandering Is the Point', 'dist', 200000],
+    ['No Ground Untrodden', 'dist', 222000],
+    ['The Map Has Run Out', 'dist', 240000],
+    ['Two Regions', 'zones', 2],
+    ['Four Regions', 'zones', 4],
+    ['Half the Map', 'zones', 6],
+    ['Nine Regions', 'zones', 9],
+    ['Every Region in the World', 'zones', 12],
+    ['First Death', 'deaths', 1],
+    ['It Happens', 'deaths', 10],
+    ['Learning the Hard Way', 'deaths', 30],
+    ['Reckless', 'deaths', 60],
+    ['Death Is a Commute', 'deaths', 90],
+    ['The Graveyard Knows You', 'deaths', 120],
+    ['You Keep Getting Up', 'deaths', 150],
+    ['An Hour Afield', 'hours', 1],
+    ['A Long Afternoon', 'hours', 5],
+    ['Half a Day Out', 'hours', 12],
+    ['Twenty Hours Under the Sky', 'hours', 20],
+  ],
+};
+
+/* Flatten into the one indexed list everything else works against. Order is
+   category by category, and it is FROZEN -- an achievement's id is its bit
+   position in every save file ever written, so new entries append, never
+   insert. */
+const ACH = [];
+(function buildAchList() {
+  for (const cat of ACH_CATS) {
+    const rows = ACH_RAW[cat.k] || [];
+    for (const [n, stat, need] of rows) {
+      const verb = ACH_VERB[stat] || '%n';
+      ACH.push({
+        id: ACH.length, cat: cat.k, ci: cat.idx, n, stat, need,
+        d: verb.replace('%n', need >= 10000 ? fmt(need) : need.toLocaleString('en-US')),
+      });
+    }
+  }
+})();
+const ACH_TOTAL = ACH.length;
+const ACH_WORDS = (ACH_TOTAL + 31) >> 5;
+const ACH_BY_CAT = {};
+for (const c of ACH_CATS) ACH_BY_CAT[c.k] = ACH.filter(a => a.cat === c.k);
+
+/* ---- the bitfield ---- */
+function newAchBits() { return new Array(ACH_WORDS).fill(0); }
+function achHas(bits, id) { return bits && ((bits[id >> 5] >>> (id & 31)) & 1) === 1; }
+function achSetBit(bits, id) { bits[id >> 5] |= (1 << (id & 31)); }
+function achCount(bits) {
+  let n = 0;
+  for (let i = 0; i < ACH_WORDS; i++) {
+    let v = bits[i] | 0;
+    v = v - ((v >> 1) & 0x55555555);
+    v = (v & 0x33333333) + ((v >> 2) & 0x33333333);
+    n += (((v + (v >> 4)) & 0x0f0f0f0f) * 0x01010101) >> 24;
+  }
+  return n;
+}
+/* pack/unpack for the save file: 8 words -> 8 base-36 chunks */
+function achPack(bits) {
+  const w = bits.map(x => (x >>> 0).toString(36));
+  while (w.length > 1 && w[w.length - 1] === '0') w.pop();   // an early board is mostly empty high words
+  return w.join('.');
+}
+function achUnpack(s) {
+  const b = newAchBits();
+  if (typeof s !== 'string') return b;
+  const p = s.split('.');
+  for (let i = 0; i < ACH_WORDS && i < p.length; i++) b[i] = parseInt(p[i], 36) | 0;
+  return b;
+}
+
+/* ---- the lifetime ledger, on disk ----
+   Key order is FROZEN: it is positional in every save file ever written, so new
+   counters append to the end and nothing is ever removed or reordered. Values go
+   out as base-36 integers, which keeps a thousand ledgers to roughly 140 bytes
+   each instead of the 400 a JSON object costs. */
+/* Densest counters first, rarest last, so the trailing-zero trim below actually
+   bites: most of a thousand adventurers have never worn a crown. */
+const LIFE_KEYS = ['kills', 'quests', 'bosses', 'raids', 'deaths', 'earn', 'given', 'passed',
+  'items', 'rare', 'epic', 'dist', 'respect', 'play', 'zmask', 'maxLv', 'maxGs', 'purse',
+  'seasons', 'ach', 'pvp', 'legend', 'ov', 'wars', 'top100', 'guildLead', 'gcrowns',
+  'firsts', 'top10', 'relics', 'ovWin', 'asc', 'sets', 'crowns', 'blaze', 'achCr'];
+function packLife(lf) {
+  if (!lf) return '';
+  const out = [];
+  for (const k of LIFE_KEYS) out.push(Math.max(0, Math.round(lf[k] || 0)).toString(36));
+  // trailing zeroes carry no information and are the bulk of an early save
+  while (out.length && out[out.length - 1] === '0') out.pop();
+  return out.join(',');
+}
+function unpackLife(s) {
+  const lf = newLifeLedger();
+  if (!s) return lf;
+  const p = s.split(',');
+  for (let i = 0; i < LIFE_KEYS.length && i < p.length; i++) lf[LIFE_KEYS[i]] = parseInt(p[i], 36) || 0;
+  return lf;
+}
+
+/** "12.4K / 33K" — where somebody stands on one achievement, in its own units. */
+function achProgTxt(who, a, isPlayer) {
+  const have = achStat(who, a.stat, isPlayer);
+  const f = n => a.need >= 10000 ? fmt(n) : (n >= 100 ? Math.round(n) : Math.round(n * 10) / 10);
+  return have >= a.need ? 'done' : f(have) + ' / ' + f(a.need);
+}
+
+/* The prize for finishing all 250 first: one set, five times the strongest
+   Mythic the world has ever forged. There is exactly one, ever. */
+const ACH_PRIZE_MULT = 5;
+const ACH_PRIZE_TIER = 6;
+const ACH_PRIZE_NAMES = ['Crown of the Whole Account', 'Mantle of Every Deed', 'Coat of Two Hundred and Fifty',
+  'Grasp of the Completionist', 'Cincture of the Finished Work', 'Greaves of All Roads Walked',
+  'Sabatons of the Last Errand', 'Vambraces of the Full Ledger', 'Torc of Nothing Left Undone',
+  'Band of the Closed Book', 'Signet of the Final Tally', 'Charm of the Emptied Board',
+  'Codex of Everything Done', 'Aegis of the Complete', 'Testament'];
 
 /* =========================================================================
    IDLE QUEST — 04 WORLD
@@ -4717,6 +5158,7 @@ function makePlayer(name, clsId) {
     stats: { dmgDone: 0, dmgTaken: 0, healed: 0, goldEarned: 0, itemsFound: 0, questsDone: 0, bossesKilled: 0, raidsDone: 0, pvpWins: 0, distance: 0 },
     autoOn: false, autoMode: 'all', dead: 0, sprint: 1, swim: 0, fill: 0.07, title: '',
     lastTownVisit: 0, seenZones: {}, af: {},
+    life: newLifeLedger(), ach: newAchBits(), achN: 0, achS: 0,
   };
   const hub = POI.hubs[0];
   p.x = hub.x + 40; p.z = hub.z + 34; p.y = groundH(p.x, p.z);
@@ -5057,10 +5499,12 @@ function giveItem(p, it, quiet) {
     for (let i = 1; i < p.bags.length; i++) if (p.bags[i].sc < p.bags[worst].sc) worst = i;
     const sold = p.bags.splice(worst, 1)[0];
     giveGold(p, sold.val);
+    p.stats.itemsGone = (p.stats.itemsGone || 0) + 1;
     toast('Bag full — sold ' + sold.n + ' for ' + fmt(sold.val) + 'g', 'sys');
   }
   p.bags.push(it);
   p.stats.itemsFound++;
+  achNoteLoot(p, it.t);
   if (it.t === 5) { p.mythic = 1; metaClaimMythic(p); }      // an Eternal must never consume an Ascendant seat
   if (!quiet) {
     sfx('loot', .9, it.t + 1);
@@ -5890,6 +6334,8 @@ const MYTHIC_HOLDERS = new Set();
 const FIRSTS = {};
 let FIRST_N = 0;
 let metaAcc = 0, warT = 180, tradeT = 40, worldEventT = 300;
+const WAR_EVERY = 250;   // seconds between clan wars, live and away alike
+let warAcc = 0;
 /* RAID NIGHT: the raid your clan has called, and who answered. One at a time,
    world-wide, so it is an event rather than wallpaper. */
 let RAID_CALL = null, raidCallT = 240;
@@ -5923,9 +6369,77 @@ function recGearScore(rec) {
 }
 function recBestTier(rec) { let t = -1; for (let i = 0; i < 15; i++) if (rec.gt[i] - 1 > t) t = rec.gt[i] - 1; return t; }
 
+/* A season wipes the run, not the person. Everything a name means — who they are,
+   how good they are, and everything they have ever done — outlives the wipe; only
+   this season's climb is reset. Without that there is nobody for a permanent
+   achievement to belong to. */
+function newLifeLedger() {
+  return { kills: 0, quests: 0, bosses: 0, raids: 0, deaths: 0, pvp: 0, earn: 0, given: 0,
+    passed: 0, items: 0, rare: 0, epic: 0, legend: 0, dist: 0, respect: 0, wars: 0,
+    maxLv: 0, maxGs: 0, purse: 0, seasons: 0, asc: 0, sets: 0, ov: 0, ovWin: 0, firsts: 0,
+    crowns: 0, gcrowns: 0, blaze: 0, achCr: 0, top10: 0, top100: 0, relics: 0,
+    guildLead: 0, zmask: 0, play: 0, ach: 0 };
+}
+/* live lifetime value = everything banked before this season + this season so far */
+function lifeVal(who, k) {
+  if (who.isPlayer || who.kind === 'player') return playerLife(who, k);
+  const lf = who.lf || (who.lf = newLifeLedger());
+  return (lf[k] || 0) + (REC_SEASON_STAT[k] ? REC_SEASON_STAT[k](who) : 0);
+}
+/* which lifetime keys also have a live in-season component on a roster record */
+const REC_SEASON_STAT = {
+  kills: r => r.kills, quests: r => r.quests, bosses: r => r.bosses, raids: r => r.raids,
+  deaths: r => r.deaths, pvp: r => r.pvp, earn: r => r.earn || 0, respect: r => r.respect,
+};
+function bankLife(rec) {
+  const lf = rec.lf || (rec.lf = newLifeLedger());
+  for (const k in REC_SEASON_STAT) lf[k] = (lf[k] || 0) + REC_SEASON_STAT[k](rec);
+  lf.maxLv = Math.max(lf.maxLv, rec.lv);
+  lf.maxGs = Math.max(lf.maxGs, rec.gs);
+  lf.seasons++;
+}
+/* per-season state, cleared every wipe. Identity and rec.lf/rec.ach are untouched. */
+function resetRecSeason(rec, rng) {
+  rec.lv = 1; rec.lp = 0; rec.gs = 0; rec.gold = rng.ri(0, 40);
+  rec.gt = new Array(15).fill(0); rec.gi = new Array(15).fill(0);
+  rec.g = -1; rec.st = 'quest'; rec.act = rng.r(4, 40);
+  rec.respect = 0; rec.kills = 0; rec.quests = 0; rec.bosses = 0;
+  rec.raids = 0; rec.deaths = 0; rec.pvp = 0; rec.earn = 0;
+  rec.rel = 0; rec.asked = 0; rec.best = -1; rec.av = null;
+  rec.online = 1; rec.hof = 0; rec.mythicAt = 0; rec.tgtBoss = null;
+  rec.achS = 0;
+  placeRec(rec, rng);
+}
+function placeRec(rec, rng) {
+  // scatter across the low-level zones so a fresh season looks busy, not clumped
+  const startZones = [DB.zones[0], DB.zones[1], DB.zones[4]].filter(Boolean);
+  const sz = rng.pick(startZones);
+  const camps = POI.camps.filter(c => c.zone === sz.id);
+  const anchor = camps.length && rng.chance(.6) ? rng.pick(camps) : { x: sz.hx, z: sz.hz };
+  rec.x = clamp(anchor.x + rng.r(-90, 90), -WORLD_HALF + 30, WORLD_HALF - 30);
+  rec.z = clamp(anchor.z + rng.r(-90, 90), -WORLD_HALF + 30, WORLD_HALF - 30);
+  rec.z2 = sz.id;
+  rec.tx = rec.x; rec.tz = rec.z;
+}
+/* Re-run the world for a new season with the SAME thousand people in it. */
+function resetRoster(seed) {
+  if (!ROSTER.length) return buildRoster(seed);
+  const rng = new RNG(seed);
+  MYTHIC_HOLDERS.clear();
+  for (const rec of ROSTER) { bankLife(rec); resetRecSeason(rec, rng); }
+  buildGuilds(rng);
+  assignGuilds(rng);
+}
+
 function buildRoster(seed) {
   ROSTER.length = 0; GUILDS.length = 0; MYTHIC_HOLDERS.clear();
   const rng = new RNG(seed);
+  buildGuilds(rng);
+  buildAdventurers(rng);
+  assignGuilds(rng);
+}
+function buildGuilds(rng) {
+  GUILDS.length = 0;
   const used = new Set();
   // ---- guilds ----
   for (let i = 0; i < GUILD_COUNT; i++) {
@@ -5941,6 +6455,8 @@ function buildRoster(seed) {
       founded: 0, playerGuild: false,
     });
   }
+}
+function buildAdventurers(rng) {
   // ---- adventurers ----
   const nameSet = new Set();
   for (let i = 0; i < POP; i++) {
@@ -5949,30 +6465,24 @@ function buildRoster(seed) {
     nameSet.add(n);
     const cls = rng.pick(CLASSES).id;
     const skill = clamp(0.55 + rng.g() * 0.22 + (i < 40 ? 0.30 : 0), 0.30, 1.55);
-    const zone = DB.zones[0];
     const rec = {
       i, n, c: cls, lv: 1, lp: 0, gs: 0, gold: rng.ri(0, 40),
       gt: new Array(15).fill(0), gi: new Array(15).fill(0),
       g: -1, st: 'quest', act: rng.r(4, 40), skill,
       x: 0, z: 0, tx: 0, tz: 0,
-      respect: 0, kills: 0, quests: 0, bosses: 0, raids: 0, deaths: 0, pvp: 0,
+      respect: 0, kills: 0, quests: 0, bosses: 0, raids: 0, deaths: 0, pvp: 0, earn: 0,
       gen: clamp(0.15 + rng.f() * 0.8, 0.05, 0.98),   // how giving they are
       rel: 0, asked: 0,                               // how they feel about you
       best: -1, av: null, title: rng.chance(.14) ? rng.pick(TITLE_BANK) : '',
       sk: rng.i(SKIN.length), hr: rng.i(HAIRC.length), z2: 0, online: 1,
       hof: 0, mythicAt: 0,
+      lf: newLifeLedger(), ach: newAchBits(), achN: 0, achS: 0, achAt: 0,
     };
-    // scatter across the low-level zones so a fresh season looks busy, not clumped
-    const startZones = [DB.zones[0], DB.zones[1], DB.zones[4]].filter(Boolean);
-    const sz = rng.pick(startZones);
-    const camps = POI.camps.filter(c => c.zone === sz.id);
-    const anchor = camps.length && rng.chance(.6) ? rng.pick(camps) : { x: sz.hx, z: sz.hz };
-    rec.x = clamp(anchor.x + rng.r(-90, 90), -WORLD_HALF + 30, WORLD_HALF - 30);
-    rec.z = clamp(anchor.z + rng.r(-90, 90), -WORLD_HALF + 30, WORLD_HALF - 30);
-    rec.z2 = sz.id;
-    rec.tx = rec.x; rec.tz = rec.z;
+    placeRec(rec, rng);
     ROSTER.push(rec);
   }
+}
+function assignGuilds(rng) {
   // ---- assign guilds (leave ~14% unguilded so recruiting means something) ----
   const shuffled = ROSTER.slice(); rng.shuffle(shuffled);
   let gi = 0;
@@ -6008,6 +6518,7 @@ function advanceRec(rec, dt, fast) {
     }
     if (best) {
       rec.tx = best.x + _mrng.r(-18, 18); rec.tz = best.z + _mrng.r(-18, 18); rec.z2 = best.zone;
+      if (rec.lf) rec.lf.zmask = (rec.lf.zmask || 0) | (1 << best.zone);   // every zone they have ever set out for
       // the lair already carries its boss id; it used to be picked and thrown away
       rec.tgtBoss = (s.k === 'boss' && best.boss != null) ? best.boss : null;
     }
@@ -6018,7 +6529,15 @@ function advanceRec(rec, dt, fast) {
   const lvBefore = rec.lv;
   while (rec.lp >= 1) { rec.lp -= 1; rec.lv++; }
   if (lvBefore < ASCEND_LEVEL && rec.lv >= ASCEND_LEVEL) tryAscend(rec, fast);
-  rec.gold += (2.4 + rec.lv * 1.15) * S.gold * dt * 0.32;
+  const earned = (2.4 + rec.lv * 1.15) * S.gold * dt * 0.32;
+  rec.gold += earned; rec.earn = (rec.earn || 0) + earned;
+  {
+    const lf0 = rec.lf || (rec.lf = newLifeLedger());
+    lf0.play += dt;
+    // coin does not sit still in a camp: the generous hand a share of it around
+    lf0.given += earned * rec.gen * 0.22;
+    if (rec.gold > (lf0.purse || 0)) lf0.purse = rec.gold;
+  }
   rec.kills += S.xp * dt * 0.42;
   if (S.k === 'quest') rec.quests += dt * 0.055;
   if (S.k === 'boss') {
@@ -6052,14 +6571,18 @@ function advanceRec(rec, dt, fast) {
   { let r = 0.055 * S.xp * dt;
     while (r >= 1 && lootN < 6) { lootN++; r -= 1; }
     if (_mrng.f() < r) lootN++; }
+  const LF = rec.lf || (rec.lf = newLifeLedger());
   for (let lr = 0; lr < lootN; lr++) {
     const slot = _mrng.i(15);
     let tier = rollTier(_mrng, S.q, rec.skill * 0.25);
     if (tier >= 5) tier = 4;                   // Mythic is awarded, never dropped
+    // the lifetime ledger counts everything found, upgrade or not
+    LF.items++; if (tier >= 2) LF.rare++; if (tier >= 3) LF.epic++; if (tier >= 4) LF.legend++;
     const ilvl = Math.max(1, Math.round(rec.lv * 2.45 + _mrng.r(-6, 10) + tier * 3));
     const newScore = ilvl * 1.15 * SLOTS[slot].w * RARITY[tier].mult * 2.1;
     const oldScore = rec.gt[slot] ? rec.gi[slot] * 1.15 * SLOTS[slot].w * RARITY[rec.gt[slot] - 1].mult * 2.1 : 0;
     if (newScore > oldScore) {
+      if (rec.gt[slot]) LF.passed++;             // the piece it replaced gets handed on
       rec.gt[slot] = tier + 1; rec.gi[slot] = ilvl;
       rec.gs = recGearScore(rec);
       const bt = recBestTier(rec);
@@ -6085,6 +6608,7 @@ function advanceRec(rec, dt, fast) {
     if (d > 2) {
       const step = Math.min(d, 5.6 * dt);
       rec.x += dx / d * step; rec.z += dz / d * step;
+      LF.dist += step;
     }
   }
 }
@@ -6098,6 +6622,7 @@ function claimFirst(bid, who, quiet) {
   FIRSTS[bid] = { n: nm, i: isPlayer ? -1 : who.i, lv: isPlayer ? G.player.level : who.lv,
     at: metaNow(), place: FIRST_N, g: isPlayer ? (G.player.guild == null ? -1 : G.player.guild) : who.g };
   const title = 'First to ' + bd.n;
+  { const lf = isPlayer ? playerLedger(G.player) : (who.lf || (who.lf = newLifeLedger())); lf.firsts++; }
   if (isPlayer) {
     G.player.title = title;
     if (!quiet) {
@@ -6131,6 +6656,203 @@ function firstsLeaders() {
   }
   return Object.keys(by).map(k => by[k]).sort((a, b) => (b.c - a.c) || (a.first - b.first));
 }
+
+/* ------------------------------ ACHIEVEMENTS ------------------------------ */
+/* Two hundred and fifty of them, held for the player and for all thousand of
+   them, forever. The whole system is one comparison per unearned achievement
+   against a lifetime number, which is the only way a board can be honest about
+   a thousand people at once without costing a frame. */
+
+// who finished all 250 first. There is only ever one, ever.
+let ACH_FIRST = null;
+let achSweep = 0;            // rolling cursor over the roster
+let achPlayerT = 0;
+
+/* --- the player's lifetime ledger --- */
+function playerLedger(p) {
+  if (!p.life) p.life = newLifeLedger();
+  return p.life;
+}
+const PLAYER_SEASON_STAT = {
+  kills: p => p.kills, quests: p => p.doneCount, bosses: p => p.bossKills,
+  raids: p => p.stats.raidsDone, deaths: p => p.deaths, pvp: p => p.stats.pvpWins,
+  earn: p => p.stats.goldEarned, respect: p => p.respect,
+  given: p => p.stats.goldGiven || 0,
+  passed: p => (p.stats.itemsGone || 0) + (p.stats.itemsGiven || 0),
+  items: p => p.stats.itemsFound, dist: p => p.stats.distance, play: p => p.playtime,
+};
+function playerLife(p, k) {
+  const lf = playerLedger(p);
+  return (lf[k] || 0) + (PLAYER_SEASON_STAT[k] ? PLAYER_SEASON_STAT[k](p) : 0);
+}
+/* fold the season's numbers into the permanent ones, then let the season reset */
+function bankPlayerLife(p) {
+  const lf = playerLedger(p);
+  for (const k in PLAYER_SEASON_STAT) lf[k] = (lf[k] || 0) + PLAYER_SEASON_STAT[k](p);
+  lf.maxLv = Math.max(lf.maxLv, p.level);
+  lf.maxGs = Math.max(lf.maxGs, (p.st && p.st.gs) || 0);
+  lf.purse = Math.max(lf.purse || 0, p.gold);
+  for (const z in p.seenZones) lf.zmask = (lf.zmask || 0) | (1 << (z | 0));
+  lf.seasons++;
+  return lf;
+}
+/** Count a found item into whichever ledger owns it. Rarity is lifetime-only. */
+function achNoteLoot(p, tier) {
+  const lf = playerLedger(p);
+  if (tier >= 2) lf.rare++;
+  if (tier >= 3) lf.epic++;
+  if (tier >= 4) lf.legend++;
+}
+function popcount32(v) {
+  v = v | 0;
+  v = v - ((v >> 1) & 0x55555555);
+  v = (v & 0x33333333) + ((v >> 2) & 0x33333333);
+  return (((v + (v >> 4)) & 0x0f0f0f0f) * 0x01010101) >> 24;
+}
+
+/* --- one stat lookup that answers for a player and a roster record alike --- */
+function achStat(who, k, isPlayer) {
+  const lf = isPlayer ? playerLedger(who) : (who.lf || (who.lf = newLifeLedger()));
+  switch (k) {
+    case 'lv': return isPlayer ? who.level : who.lv;
+    case 'maxLv': return Math.max(lf.maxLv, isPlayer ? who.level : who.lv);
+    case 'maxGs': return Math.max(lf.maxGs, isPlayer ? ((who.st && who.st.gs) || 0) : who.gs);
+    case 'purse': return Math.max(lf.purse || 0, isPlayer ? who.gold : who.gold);
+    case 'seasons': return lf.seasons + 1;             // the one you are in counts
+    case 'zones': return popcount32(lf.zmask || 0);
+    case 'hours': return (isPlayer ? playerLife(who, 'play') : (lf.play || 0)) / 3600;
+    default:
+      return isPlayer ? playerLife(who, k) : lifeVal(who, k);
+  }
+}
+
+/* --- awarding --- */
+function achAward(who, a, isPlayer, quiet) {
+  const bits = isPlayer ? (who.ach || (who.ach = newAchBits())) : (who.ach || (who.ach = newAchBits()));
+  if (achHas(bits, a.id)) return false;
+  achSetBit(bits, a.id);
+  who.achN = (who.achN || 0) + 1;
+  who.achS = (who.achS || 0) + 1;
+  const lf = isPlayer ? playerLedger(who) : who.lf;
+  lf.ach = who.achN;
+  if (isPlayer && !quiet) {
+    banner('ACHIEVEMENT', a.n);
+    toast('<b style="color:' + ACH_CAT_BY[a.cat].c + '">' + esc(a.n) + '</b> <span class="tiny">' + esc(a.d) + '</span>', 'sys');
+    sfx('quest', .8);
+  }
+  if (who.achN >= ACH_TOTAL) achFinish(who, isPlayer, quiet);
+  return true;
+}
+/* Sweep one actor's unearned achievements. ~250 comparisons at worst, fewer as
+   the board fills, and only ever for one actor at a time. */
+function achCheck(who, isPlayer, quiet) {
+  const bits = isPlayer ? (who.ach || (who.ach = newAchBits())) : (who.ach || (who.ach = newAchBits()));
+  if ((who.achN || 0) >= ACH_TOTAL) return 0;
+  // the running-maximum stats have to be kept up to date before they are read
+  const lf = isPlayer ? playerLedger(who) : (who.lf || (who.lf = newLifeLedger()));
+  const lv = isPlayer ? who.level : who.lv;
+  const gs = isPlayer ? ((who.st && who.st.gs) || 0) : who.gs;
+  if (lv > lf.maxLv) lf.maxLv = lv;
+  if (gs > lf.maxGs) lf.maxGs = gs;
+  if (who.gold > (lf.purse || 0)) lf.purse = who.gold;
+  if (isPlayer) for (const z in who.seenZones) lf.zmask = (lf.zmask || 0) | (1 << (z | 0));
+  let got = 0;
+  for (let i = 0; i < ACH_TOTAL; i++) {
+    if (achHas(bits, i)) continue;
+    const a = ACH[i];
+    if (achStat(who, a.stat, isPlayer) >= a.need) { achAward(who, a, isPlayer, quiet); got++; }
+  }
+  return got;
+}
+/* Recount from the bitfield -- used on load, where achN could be stale. */
+function achRecount(who) { who.achN = achCount(who.ach || (who.ach = newAchBits())); return who.achN; }
+
+/** The board's one prize: whoever closes all 250 first, ever. */
+function achFinish(who, isPlayer, quiet) {
+  if (ACH_FIRST) return;
+  ACH_FIRST = { n: isPlayer ? who.name : who.n, isPlayer: !!isPlayer,
+    i: isPlayer ? -1 : who.i, season: SEASON.num, at: metaNow() };
+  const lf = isPlayer ? playerLedger(who) : who.lf;
+  lf.testament = 1;
+  if (isPlayer) grantTestamentPlayer(who); else grantTestamentRec(who);
+  if (!quiet) {
+    chatPush('world', '═══ ' + ACH_FIRST.n + ' HAS COMPLETED ALL ' + ACH_TOTAL + ' ACHIEVEMENTS ═══');
+    chatPush('world', 'The Testament is forged — gear ' + ACH_PRIZE_MULT + '× beyond any Mythic. It will never be forged again.');
+    if (isPlayer) { banner('THE TESTAMENT', 'All ' + ACH_TOTAL + ' achievements — first in the world'); musicSet('victory', true); }
+    else banner('THE TESTAMENT', ACH_FIRST.n + ' finished the board first');
+  }
+}
+/* five times the strongest Mythic the world has ever forged */
+function testamentIlvl() { return Math.round(mythicPeakIlvl() * ACH_PRIZE_MULT); }
+function grantTestamentRec(rec) {
+  const il = testamentIlvl();
+  for (let i = 0; i < 15; i++) { rec.gt[i] = ACH_PRIZE_TIER + 1; rec.gi[i] = il; }
+  rec.gs = recGearScore(rec); rec.best = ACH_PRIZE_TIER;
+  rec.title = 'the Complete';
+}
+function grantTestamentPlayer(p) {
+  const il = testamentIlvl();
+  const rng = new RNG((SEED ^ 0x7E57) + SEASON.num * 131);
+  let k = 0;
+  for (const slot of SLOT_KEYS) {
+    const it = genItem(rng, il, ACH_PRIZE_TIER, slot, p.cls);
+    it.n = ACH_PRIZE_NAMES[k % ACH_PRIZE_NAMES.length]; k++;
+    it.fl = 'Two hundred and fifty deeds, and no one did them sooner.';
+    p.gear[slot] = it;
+  }
+  p.title = 'the Complete';
+  p.st = calcStats(p); p.resMax = resourceMax(p); p.hp = p.st.hpMax;
+  styleFromGear(p, p.gear, p.cls);
+  uiDirty.all = 1;
+}
+/* The Testament outlives its season the same way an Eternal relic does. */
+function testamentCarry(p) {
+  if (!ACH_FIRST || !ACH_FIRST.isPlayer) return;
+  grantTestamentPlayer(p);
+}
+
+/** The board, sorted. Player folded in so the crown can be theirs. */
+function achLeaders(limit) {
+  const rows = ROSTER.map(r => ({ n: r.n, c: r.c, g: r.g, achN: r.achN || 0, achS: r.achS || 0,
+    isPlayer: false, i: r.i, done: (r.achN || 0) >= ACH_TOTAL }));
+  const p = G.player;
+  if (p) rows.push({ n: p.name, c: p.cls, g: p.guild == null ? -1 : p.guild, achN: p.achN || 0,
+    achS: p.achS || 0, isPlayer: true, i: -1, done: (p.achN || 0) >= ACH_TOTAL });
+  rows.sort((a, b) => (b.achN - a.achN) || (b.achS - a.achS) || a.n.localeCompare(b.n));
+  return limit ? rows.slice(0, limit) : rows;
+}
+/** This season's crown: most achievements EARNED since the wipe, not held. */
+function achSeasonLeaders(limit) {
+  const rows = achLeaders(0).slice();
+  rows.sort((a, b) => (b.achS - a.achS) || (b.achN - a.achN) || a.n.localeCompare(b.n));
+  return limit ? rows.slice(0, limit) : rows;
+}
+function achPlayerRank() {
+  const rows = achLeaders(0);
+  return rows.findIndex(r => r.isPlayer) + 1;
+}
+
+/* Throttled: the player every couple of seconds, and a slice of the roster each
+   tick so the whole thousand is swept about every ten seconds. Achievements are
+   slow by design; nothing here needs to be prompt to the frame. */
+const ACH_SLICE = 48;
+function achTick(dt, fast) {
+  const p = G.player;
+  achPlayerT -= dt;
+  if (p && achPlayerT <= 0) { achPlayerT = 2; achCheck(p, true, fast); }
+  for (let k = 0; k < ACH_SLICE; k++) {
+    const rec = ROSTER[achSweep % ROSTER.length];
+    achSweep++;
+    if (rec) achCheck(rec, false, fast);
+  }
+}
+/* An offline stretch skips the slices; sweep everyone once instead. */
+function achSweepAll(quiet) {
+  const p = G.player;
+  if (p) achCheck(p, true, quiet);
+  for (const rec of ROSTER) achCheck(rec, false, quiet);
+}
+
 function mythicAvailable(who) {
   if (MYTHIC_HOLDERS.size < MYTHIC_LIMIT) return true;
   return MYTHIC_HOLDERS.has(who === G.player ? -1 : who.i);
@@ -6168,6 +6890,7 @@ function tryAscend(who, quiet) {
   const place = MYTHIC_HOLDERS.size;
   const nm = isPlayer ? G.player.name : who.n;
   if (isPlayer) grantMythicSetPlayer(); else { who.mythicAt = metaNow(); grantMythicSetRec(who); }
+  { const lf = isPlayer ? playerLedger(G.player) : (who.lf || (who.lf = newLifeLedger())); lf.asc++; lf.sets++; }
   SEASON.ascended.push({ n: nm, place, lv: who.lv || (isPlayer ? G.player.level : 0), at: metaNow(), isPlayer });
   const ord = ['first', 'second', 'third'][place - 1] || place + 'th';
   const mp = Math.round((mythicPower(SEASON.num) - 1) * 100);
@@ -6208,6 +6931,9 @@ function metaTick(dt) {
   }
   if (metaAcc > META_STEP * 8) metaAcc = 0;
 
+  // ---- the board ----
+  achTick(dt, false);
+
   // ---- clan wars ----
   warT -= dt;
   if (warT <= 0) { warT = 150 + Math.random() * 200; runClanWar(); }
@@ -6245,11 +6971,19 @@ function metaOffline(ms) {
   for (let s = 0; s < n; s++) {
     META_NOW = startTs + s * realStep * 1000;      // simulated wall clock
     for (let i = 0; i < ROSTER.length; i++) advanceRec(ROSTER[i], realStep, true);
-    if ((s % 12) === 0) runClanWar(true);
+    /* Wars used to fire once every twelfth step whatever a step was worth, so an
+       away world declared them at a third of the live cadence and no clan ever
+       built a war record. Accumulate real seconds and fight at the live rate. */
+    warAcc += realStep;
+    for (let g = 0; warAcc >= WAR_EVERY && g < 6; g++) { warAcc -= WAR_EVERY; runClanWar(true); }
     if ((s % 9) === 0) { if (RAID_CALL) resolveCalledRaid(); callRaid(); }
+    /* Achievements are checked on a slice while you watch; away, the world has
+       to be swept periodically or a thousand people come back holding nothing. */
+    if ((s % 60) === 0) achSweepAll(true);
     if (SEASON.milestone && META_NOW > SEASON.milestone + SEASON_GRACE_MS) break;
     if (META_NOW > SEASON.start + SEASON_MS) break;   // the 7-day backstop ends the roster's season too
   }
+  achSweepAll(true);
   META_NOW = 0;
   // scatter everyone to sensible places so the world looks lived-in on return
   for (const rec of ROSTER) {
@@ -6291,6 +7025,9 @@ function runClanWar(quiet) {
   const stake = Math.round(40 + Math.min(pa, pb) * 0.02);
   w.wins++; l.losses++;
   w.respect += stake; l.respect = Math.max(0, l.respect - stake * 0.4);
+  // a win belongs to everyone who marched, permanently
+  for (const mi of w.members) { const r = ROSTER[mi]; if (r) (r.lf || (r.lf = newLifeLedger())).wars++; }
+  if (G.player && G.player.guild === w.i) playerLedger(G.player).wars++;
   WAR_LOG.unshift({ t: metaNow(), w: w.n, l: l.n, s: stake, wi: w.i, li: l.i });
   if (WAR_LOG.length > 60) WAR_LOG.pop();
   if (!quiet) {
@@ -6381,6 +7118,7 @@ function sellToBoard(bagIdx) {
   const price = Math.round(it.val * (1.0 + Math.random() * .5));
   p.bags.splice(bagIdx, 1);
   giveGold(p, price);
+  p.stats.itemsGone = (p.stats.itemsGone || 0) + 1;
   sfx('coin', 1);
   const buyer = ROSTER[(Math.random() * ROSTER.length) | 0];
   chatPush('trade', (buyer ? buyer.n : 'A merchant') + ' bought your [' + it.n + '] for ' + fmt(price) + 'g');
@@ -7225,12 +7963,18 @@ function ovAward() {
   if (!ov || ov.paid) return;
   ov.paid = 1;
   if (ov.ph < 3) ov.ph = 3;
+  /* Standing in the finale counts for the ledger whatever the outcome; walking
+     out of it counts for a great deal more. */
+  { const pl = playerLedger(G.player); pl.ov++; if (ov.outcome === 2 && ov.pAlive) pl.ovWin++;
+    for (const rec of ROSTER) (rec.lf || (rec.lf = newLifeLedger())).ov++;
+    if (ov.outcome === 2) for (const si of ov.survIdx) { const r = ROSTER[si]; if (r) { r.lf.ovWin++; r.lf.relics++; } } }
   if (ov.outcome !== 2) return;                              // wipe and pyrrhic pay nothing
   const rng = new RNG((ov.seed ^ 0x2545F491) | 0);
   if (ov.pAlive) {
     const it = genItem(rng, eternalIlvl(ov.lvl), ETERNAL_TIER, rng.pick(SLOT_KEYS), G.player.cls);
     it.src = { s: ov.n, k: 'Kaarnathul, the Unmade' };
     ETERNAL.p.push(it);
+    playerLedger(G.player).relics = ETERNAL.p.length;
   }
   /* AI relics are re-granted next season onto roster indices 40+ ONLY. buildRoster gives
      0-39 a skill bonus; relics landing there took 2.25 of the 3 Ascendant seats in testing
@@ -7387,6 +8131,11 @@ function endSeason(quiet) {
   // and the Trailblazer: most world-boss firsts taken across the whole season
   const blazers = firstsLeaders();
   const blazer = blazers[0] || null;
+  /* and the Completionist: most achievements EARNED this season. Held count is
+     the tiebreak, so a veteran with a full board cannot coast to the crown. */
+  achSweepAll(quiet);
+  const achBoard = achSeasonLeaders(0);
+  const completionist = (achBoard[0] && achBoard[0].achS > 0) ? achBoard[0] : null;
   const rec = {
     num: SEASON.num, ended: Date.now(),
     champ: capsule(byLevel),
@@ -7399,11 +8148,47 @@ function endSeason(quiet) {
       guild: blazer.g >= 0 && GUILDS[blazer.g] ? GUILDS[blazer.g].n : '' } : null,
     firstsTaken: FIRST_N, firstsTotal: DB.bosses.length,
     playerFirsts: G.player ? firstsBy(G.player.name) : 0,
+    ach: completionist ? { n: completionist.n, c: completionist.c, isPlayer: !!completionist.isPlayer,
+      earned: completionist.achS, held: completionist.achN,
+      guild: completionist.g >= 0 && GUILDS[completionist.g] ? GUILDS[completionist.g].n : '' } : null,
+    achTotal: ACH_TOTAL,
+    playerAch: G.player ? (G.player.achN || 0) : 0,
+    playerAchS: G.player ? (G.player.achS || 0) : 0,
+    achRank: achPlayerRank(),
+    testament: ACH_FIRST ? { n: ACH_FIRST.n, isPlayer: ACH_FIRST.isPlayer, season: ACH_FIRST.season } : null,
     top: all.slice(0, 10).map(r => ({ n: r.n, lv: r.lv, gs: r.gs, isPlayer: !!r.isPlayer })),
     playerRank: all.findIndex(r => r.isPlayer) + 1,
     playerGearRank: all.slice().sort((a, b) => b.gs - a.gs).findIndex(r => r.isPlayer) + 1,
     playerLv: G.player ? G.player.level : 0,
   };
+  /* Crowns go into the permanent ledger before the wipe touches anything, so
+     next season's Legend achievements can see what happened in this one. */
+  const ledgerOf = row => !row ? null
+    : row.isPlayer ? playerLedger(G.player)
+    : (ROSTER[row.i] ? (ROSTER[row.i].lf || (ROSTER[row.i].lf = newLifeLedger()))
+       : (ROSTER.find(r => r.n === row.n) || {}).lf || null);
+  { const L = ledgerOf(byLevel); if (L) L.crowns++; }
+  { const L = ledgerOf(blazer); if (L) L.blaze++; }
+  { const L = ledgerOf(completionist); if (L) L.achCr++; }
+  /* Clan standing is credited to the top ten of forty-eight, not the winner
+     alone: guild rosters are drawn fresh every season, so pinning an achievement
+     on the single crowned clan made it a 2% lottery nobody could plan around --
+     and at five it still shut a third of contenders out over nine seasons. */
+  const gtop = GUILDS.slice().sort((a, b) => b.respect - a.respect).slice(0, 10);
+  for (const g of gtop) {
+    for (const mi of g.members) { const r = ROSTER[mi]; if (r) (r.lf || (r.lf = newLifeLedger())).gcrowns++; }
+    if (g.playerGuild) playerLedger(G.player).gcrowns++;
+  }
+  for (let i = 0; i < all.length && i < 100; i++) {
+    const L = ledgerOf(all[i]); if (!L) continue;
+    L.top100++; if (i < 10) L.top10++;
+  }
+  // top earner in your own clan, counted once per season
+  for (const g of GUILDS) {
+    let bestI = -1, bestR = -1;
+    for (const mi of g.members) { const r = ROSTER[mi]; if (r && r.respect > bestR) { bestR = r.respect; bestI = mi; } }
+    if (bestI >= 0) { const r = ROSTER[bestI]; (r.lf || (r.lf = newLifeLedger())).guildLead++; }
+  }
   SEASON.champions.unshift(rec);
   // the roll of champions is permanent — every season ever played, kept forever
   if (SEASON.champions.length > 400) SEASON.champions.pop();
@@ -7427,8 +8212,12 @@ function startNewSeason() {
   MYTHIC_HOLDERS.clear();
   // ETERNAL is deliberately NOT cleared here. Mythic dies with its season; relics do not.
   SEASON.ov = null;
-  buildRoster(SEED ^ (SEASON.num * 7919));
+  /* the same thousand names come back to a level-1 world, carrying everything
+     they have ever done with them */
+  resetRoster(SEED ^ (SEASON.num * 7919));
   ovCarryApplyRoster();
+  // the Testament is forged once and kept forever, like an Eternal relic
+  if (ACH_FIRST && !ACH_FIRST.isPlayer && ROSTER[ACH_FIRST.i]) grantTestamentRec(ROSTER[ACH_FIRST.i]);
   for (const k in RAID_LOCK) delete RAID_LOCK[k];
   for (const k in BOSS_STATE) delete BOSS_STATE[k];
   for (const k in FIRSTS) delete FIRSTS[k];
@@ -7442,12 +8231,19 @@ function startNewSeason() {
   // reset the player to level 1 with nothing but a plain weapon
   const p = G.player;
   const keepName = p.name, keepCls = p.cls;
+  /* The ledger and the board are the player's, not the season's. Bank one and
+     carry the other across intact -- an achievement is earned forever. */
+  const life = bankPlayerLife(p);
+  const bits = p.ach || newAchBits();
+  const held = p.achN || achCount(bits);
   const np = makePlayer(keepName, keepCls);
+  np.life = life; np.ach = bits; np.achN = held; np.achS = 0;
   np.stats.seasons = (p.stats.seasons || 0) + 1;
   np.autoOn = p.autoOn; np.autoMode = p.autoMode;
   /* Whatever you carried out of the Overlord comes with you into a level-1 world.
      This is the only gear in the game that survives a wipe. */
   ovCarryApplyPlayer(np);
+  testamentCarry(np);            // and the Testament, if it was ever yours
   np.st = calcStats(np); np.resMax = resourceMax(np); np.hp = np.st.hpMax;
   styleFromGear(np, np.gear, np.cls);
   G.player = np;
@@ -8175,11 +8971,15 @@ const PANEL_DEF = {
   guild: { t: 'Clan', tabs: ['My Clan', 'Clans', 'Wars'] },
   raid: { t: 'Raids & Bosses', tabs: ['Raids', 'World Bosses'] },
   hof: { t: 'Hall of Fame', tabs: ['Top 100', 'Top 20 Clans', 'Ascendants', 'First Blood', 'Past Seasons'] },
+  ach: { t: 'Achievements', tabs: ['Your Board', 'All 250', 'Leaders', 'The Testament'] },
   social: { t: 'Adventurers', tabs: ['Online', 'Whispers', 'Chat'] },
   opts: { t: 'Settings', tabs: ['Game', 'Graphics', 'Audio', 'About'] },
 };
 function panelOpen(which) {
-  if (PANEL === which) { panelClose(); return; }
+  if (PANEL === which && !PANEL_MODAL) { panelClose(); return; }
+  /* An open inspect sheet suppresses renderPanel. Opening a panel from the bar
+     without clearing it left the sheet's body sitting under the new panel's tabs. */
+  PANEL_MODAL = false;
   PANEL = which;
   const def = PANEL_DEF[which];
   $('ptitle').textContent = def.t;
@@ -8320,6 +9120,15 @@ const PANEL_RENDER = {
     ['Items Found', st.itemsFound], ['Gold Earned', fmt(st.goldEarned)], ['Distance Travelled', fmt(st.distance) + ' m'],
     ['Time Played', dur(p.playtime * 1000)], ['Seasons Played', (st.seasons || 0) + 1]];
     for (const [k, v] of rows) h += '<div class="row"><span class="k">' + k + '</span><b>' + v + '</b></div>';
+    // everything above dies with the season; everything below does not
+    h += '<h4 class="sec">For All Time</h4>';
+    const life = [['Achievements', '<span style="color:#ffd766">' + (p.achN || 0) + '</span> <span class="tiny">/ ' + ACH_TOTAL + '</span>'],
+    ['Earned this season', '+' + (p.achS || 0)], ['Lifetime kills', fmt(playerLife(p, 'kills'))],
+    ['Lifetime quests', fmt(playerLife(p, 'quests'))], ['Lifetime bosses', fmt(playerLife(p, 'bosses'))],
+    ['Lifetime gold earned', fmt(playerLife(p, 'earn'))], ['Highest level reached', achStat(p, 'maxLv', true)],
+    ['Best gear score ever', fmt(achStat(p, 'maxGs', true))], ['Ascensions', playerLedger(p).asc],
+    ['Season crowns', playerLedger(p).crowns], ['Eternal relics', ETERNAL.p.length]];
+    for (const [k, v] of life) h += '<div class="row"><span class="k">' + k + '</span><b>' + v + '</b></div>';
     const hof = hallOfFame(POP + 1);
     const rank = hof.findIndex(r => r.isPlayer) + 1;
     h += '<h4 class="sec">Standing</h4><div class="card center"><div style="font-size:26px;font-weight:900;color:var(--gold)">#' + rank + '</div>' +
@@ -8688,6 +9497,10 @@ const PANEL_RENDER = {
       // seasons archived before the Overlord existed have no c.ov, so guard it
       if (c.blazer) h += '<div class="row"><span class="k">Trailblazer</span><b style="color:#ffd766">' +
         esc(c.blazer.n) + (c.blazer.isPlayer ? ' (you)' : '') + ' · ' + c.blazer.c + ' firsts</b></div>';
+      if (c.ach) h += '<div class="row"><span class="k">Achievement Crown</span><b style="color:#f0c257">' +
+        esc(c.ach.n) + (c.ach.isPlayer ? ' (you)' : '') + ' · +' + c.ach.earned + ' earned</b></div>';
+      if (c.testament) h += '<div class="row"><span class="k">The Testament</span><b class="q6">' +
+        esc(c.testament.n) + (c.testament.isPlayer ? ' (you)' : '') + ' · all ' + (c.achTotal || ACH_TOTAL) + '</b></div>';
       if (c.ov) h += '<div class="row"><span class="k">The Overlord</span><b style="color:' +
         (c.ov.outcome === 2 ? '#7ff2ff' : c.ov.outcome === 1 ? '#d0a0ff' : '#ff5a72') + '">' +
         (c.ov.outcome === 2 ? 'HELD \u00b7 ' + c.ov.alive + ' stood'
@@ -8699,6 +9512,112 @@ const PANEL_RENDER = {
       }
       h += '<div class="row"><span class="k">You finished</span><b>#' + c.playerRank + ' by level' +
         (c.playerGearRank ? ', #' + c.playerGearRank + ' by gear' : '') + ' · Lv ' + c.playerLv + '</b></div></div>';
+    }
+    return h;
+  },
+
+  /* ---------------------------------------------------------------- ACHIEVEMENTS */
+  ach(tab) {
+    const p = G.player;
+    const held = p.achN || 0, pct = held / ACH_TOTAL * 100;
+    if (tab === 0) {
+      const rank = achPlayerRank();
+      let h = '<div class="card center" style="border-color:#ffd766">' +
+        '<b style="color:#ffd766;font-size:16px">' + held + ' / ' + ACH_TOTAL + '</b>' +
+        '<div class="bar" style="margin:6px 0"><i style="width:' + pct.toFixed(1) + '%;background:linear-gradient(90deg,#f0c257,#ffd766)"></i>' +
+        '<span>' + pct.toFixed(1) + '%</span></div>' +
+        '<div class="tiny">Achievements are the only thing in this world that a season cannot take back. ' +
+        'They stay with your name through every wipe — and through every one of theirs.</div></div>';
+      h += '<div class="grid g3" style="margin:6px 0">' +
+        '<div class="card center"><b>#' + rank + '</b><div class="tiny">of ' + (POP + 1) + ' adventurers</div></div>' +
+        '<div class="card center"><b style="color:#ffd766">' + (p.achS || 0) + '</b><div class="tiny">earned this season</div></div>' +
+        '<div class="card center"><b>' + (ACH_TOTAL - held) + '</b><div class="tiny">still to do</div></div></div>';
+      h += '<h4 class="sec">By Category</h4>';
+      for (const c of ACH_CATS) {
+        const rows = ACH_BY_CAT[c.k];
+        const got = rows.filter(a => achHas(p.ach, a.id)).length;
+        h += '<div style="margin:5px 0"><div style="display:flex;justify-content:space-between;font-size:12px">' +
+          '<b style="color:' + c.c + '">' + c.n + '</b><span class="tiny">' + got + ' / ' + rows.length + '</span></div>' +
+          '<div class="bar sm"><i style="width:' + (got / rows.length * 100).toFixed(1) + '%;background:' + c.c + '"></i></div></div>';
+      }
+      // the handful you are actually closest to finishing
+      const next = ACH.filter(a => !achHas(p.ach, a.id))
+        .map(a => ({ a, f: Math.min(1, achStat(p, a.stat, true) / a.need) }))
+        .sort((x, y) => y.f - x.f).slice(0, 8);
+      if (next.length) {
+        h += '<h4 class="sec">Closest to Done</h4>';
+        for (const { a, f } of next) {
+          h += '<div style="margin:5px 0"><div style="display:flex;justify-content:space-between;gap:8px;font-size:12px">' +
+            '<b style="color:' + ACH_CAT_BY[a.cat].c + '">' + esc(a.n) + '</b>' +
+            '<span class="tiny">' + achProgTxt(p, a, true) + '</span></div>' +
+            '<div class="bar sm"><i style="width:' + (f * 100).toFixed(1) + '%;background:' + ACH_CAT_BY[a.cat].c + '"></i></div>' +
+            '<div class="tiny" style="opacity:.7">' + esc(a.d) + '</div></div>';
+        }
+      }
+      return h;
+    }
+    if (tab === 1) {
+      let h = '<div class="tiny">All ' + ACH_TOTAL + ' of them. Gold is earned; grey is waiting.</div>';
+      for (const c of ACH_CATS) {
+        const rows = ACH_BY_CAT[c.k];
+        const got = rows.filter(a => achHas(p.ach, a.id)).length;
+        h += '<h4 class="sec" style="color:' + c.c + '">' + c.n + ' <span class="tiny" style="color:#8f98a9">' +
+          got + '/' + rows.length + ' · ' + esc(c.d) + '</span></h4>';
+        for (const a of rows) {
+          const done = achHas(p.ach, a.id);
+          h += '<div class="row"><span class="k" style="' + (done ? 'color:' + c.c + ';font-weight:700' : 'opacity:.55') + '">' +
+            (done ? '★ ' : '☆ ') + esc(a.n) + '<div class="tiny" style="opacity:.7;font-weight:400">' + esc(a.d) + '</div></span>' +
+            '<b class="tiny" style="' + (done ? 'color:' + c.c : 'opacity:.6') + '">' + achProgTxt(p, a, true) + '</b></div>';
+        }
+      }
+      return h;
+    }
+    if (tab === 2) {
+      const board = achLeaders(60), season = achSeasonLeaders(10);
+      let h = '<div class="card center" style="border-color:#ffd766"><b style="color:#ffd766">THE ACHIEVEMENT CROWN</b>' +
+        '<div class="tiny" style="margin-top:4px">Crowned at every season\'s end to whoever earned the most achievements <b>during</b> it — ' +
+        'not whoever holds the most. A veteran with a full board cannot coast to it.</div></div>';
+      h += '<h4 class="sec">Earned This Season</h4>';
+      season.forEach((r, i) => {
+        h += '<div class="row' + (r.isPlayer ? ' me' : '') + '"><span class="k">' + (i + 1) + '. ' +
+          CLASS_BY[r.c].ic + ' ' + esc(r.n) + (r.isPlayer ? ' (you)' : '') +
+          (r.g >= 0 && GUILDS[r.g] ? ' <span class="tiny">' + esc(GUILDS[r.g].n) + '</span>' : '') +
+          '</span><b style="color:#ffd766">+' + r.achS + '</b></div>';
+      });
+      h += '<h4 class="sec">Held For All Time</h4><table class="lb"><tr><th>#</th><th>Name</th><th>Class</th><th>Clan</th><th>Held</th><th>Season</th></tr>';
+      board.forEach((r, i) => {
+        h += '<tr class="' + (r.isPlayer ? 'me' : '') + '"><td class="tiny">' + (i + 1) + '</td>' +
+          '<td><b' + (r.done ? ' class="q6"' : '') + '>' + esc(r.n) + (r.isPlayer ? ' (you)' : '') + '</b></td>' +
+          '<td class="tiny">' + CLASS_BY[r.c].n + '</td>' +
+          '<td class="tiny">' + (r.g >= 0 && GUILDS[r.g] ? esc(GUILDS[r.g].n) : '—') + '</td>' +
+          '<td><b style="color:#ffd766">' + r.achN + '</b> <span class="tiny">/ ' + ACH_TOTAL + '</span></td>' +
+          '<td class="tiny">+' + r.achS + '</td></tr>';
+      });
+      return h + '</table>';
+    }
+    // ---- the Testament ----
+    const il = testamentIlvl(), peak = mythicPeakIlvl();
+    let h = '<div class="card center" style="border-color:#7ff2ff"><b class="q6" style="font-size:16px">THE TESTAMENT</b>' +
+      '<div class="tiny" style="margin-top:4px">The first adventurer in the world to close all ' + ACH_TOTAL +
+      ' achievements is handed a full set forged at <b class="q6">' + ACH_PRIZE_MULT + '×</b> the strongest Mythic the world has ever made. ' +
+      'It carries across every season after, the way an Eternal relic does. It is forged exactly once, and then never again.</div></div>';
+    h += '<div class="grid g3" style="margin:6px 0">' +
+      '<div class="card center"><b>' + peak + '</b><div class="tiny">Mythic peak, season ' + SEASON.num + '</div></div>' +
+      '<div class="card center"><b class="q6">' + il + '</b><div class="tiny">Testament item level</div></div>' +
+      '<div class="card center"><b>' + (ACH_TOTAL - held) + '</b><div class="tiny">left for you</div></div></div>';
+    if (ACH_FIRST) {
+      h += '<div class="card center" style="border-color:#7ff2ff;margin-top:8px">' +
+        '<b class="q6" style="font-size:15px">' + esc(ACH_FIRST.n) + (ACH_FIRST.isPlayer ? ' (you)' : '') + '</b>' +
+        '<div class="tiny" style="margin-top:3px">closed the board in Season ' + ACH_FIRST.season +
+        ' and wears the Testament. Nobody else ever will.</div></div>';
+    } else {
+      const lead = achLeaders(5);
+      h += '<h4 class="sec">The Race</h4>';
+      lead.forEach((r, i) => {
+        h += '<div class="row' + (r.isPlayer ? ' me' : '') + '"><span class="k">' + (i + 1) + '. ' + esc(r.n) +
+          (r.isPlayer ? ' (you)' : '') + '</span><b>' + r.achN + ' <span class="tiny">/ ' + ACH_TOTAL + '</span></b></div>';
+      });
+      h += '<div class="tiny center" style="padding:10px;opacity:.8">Unclaimed. It goes to whoever gets there first.</div>';
     }
     return h;
   },
@@ -8915,6 +9834,20 @@ function showAIInspect(rec) {
     '<div class="row"><span class="k">Raids</span><b>' + fmt(rec.raids) + '</b></div>' +
     '<div class="row"><span class="k">Deaths</span><b>' + fmt(rec.deaths) + '</b></div>' +
     '<div class="row"><span class="k">Respect</span><b>' + fmt(Math.round(rec.respect)) + '</b></div>';
+  /* Their permanent record: this is the only part of them a season does not erase,
+     and it is the reason they are somebody rather than a fresh roll of the dice. */
+  {
+    const lf = rec.lf || newLifeLedger();
+    h += '<h4 class="sec">For All Time</h4>' +
+      '<div class="row"><span class="k">Achievements</span><b style="color:#ffd766">' + (rec.achN || 0) +
+      ' <span class="tiny">/ ' + ACH_TOTAL + '</span></b></div>' +
+      '<div class="row"><span class="k">Earned this season</span><b>+' + (rec.achS || 0) + '</b></div>' +
+      '<div class="row"><span class="k">Seasons played</span><b>' + (lf.seasons + 1) + '</b></div>' +
+      '<div class="row"><span class="k">Lifetime kills</span><b>' + fmt(lifeVal(rec, 'kills')) + '</b></div>' +
+      (lf.crowns ? '<div class="row"><span class="k">Crowns</span><b style="color:var(--gold)">' + lf.crowns + '</b></div>' : '') +
+      (lf.asc ? '<div class="row"><span class="k">Ascensions</span><b class="q5">' + lf.asc + '</b></div>' : '') +
+      (lf.relics ? '<div class="row"><span class="k">Eternal relics</span><b class="q6">' + lf.relics + '</b></div>' : '');
+  }
   // ---- talk to them like a person ----
   const rel = rec.rel || 0;
   const mood = rel > 0.5 ? ['fond of you', '#4ad24a'] : rel > 0.12 ? ['warm', '#9ad2ff']
@@ -9072,6 +10005,26 @@ function showSeasonEnd(rec) {
       ' claimed this season' + ((rec.firstsTotal || 100) - (rec.firstsTaken || 0) > 0
         ? ' — ' + ((rec.firstsTotal || 100) - (rec.firstsTaken || 0)) + ' were never brought down' : '') +
       (rec.playerFirsts ? ' · you took ' + rec.playerFirsts : '') + '</div></div>';
+  }
+
+  if (rec.ach) {
+    h += '<div class="champ" style="border-color:#f0c257;box-shadow:0 0 40px rgba(240,194,87,.2)">' +
+      '<div class="tiny" style="letter-spacing:.3em;color:#f0c257">THE ACHIEVEMENT CROWN \u2014 MOST EARNED THIS SEASON</div>' +
+      '<div class="cn">' + esc(rec.ach.n) + (rec.ach.isPlayer ? ' <span style="font-size:.5em;color:#4ad24a">(YOU)</span>' : '') + '</div>' +
+      '<div class="tiny" style="color:#c9bda0;margin-top:4px">' + rec.ach.earned + ' achievements earned this season \u00b7 ' +
+      rec.ach.held + ' of ' + (rec.achTotal || ACH_TOTAL) + ' held for all time' +
+      (rec.ach.guild ? ' \u00b7 ' + esc(rec.ach.guild) : '') + '</div>' +
+      '<div class="tiny" style="color:#8f98a9;margin-top:5px">You finished #' + (rec.achRank || '\u2014') +
+      ' with ' + (rec.playerAch || 0) + ' held, ' + (rec.playerAchS || 0) + ' earned this season. ' +
+      'Achievements survive the wipe \u2014 they carry into the next world with you.</div></div>';
+  }
+  if (rec.testament) {
+    h += '<div class="champ" style="border-color:#7ff2ff;box-shadow:0 0 44px rgba(127,242,255,.25)">' +
+      '<div class="tiny" style="letter-spacing:.3em;color:#7ff2ff">THE TESTAMENT \u2014 ALL ' + (rec.achTotal || ACH_TOTAL) + ' CLOSED</div>' +
+      '<div class="cn">' + esc(rec.testament.n) + (rec.testament.isPlayer ? ' <span style="font-size:.5em;color:#4ad24a">(YOU)</span>' : '') + '</div>' +
+      '<div class="tiny" style="color:#c9bda0;margin-top:4px">Closed the board in Season ' + rec.testament.season +
+      ' \u00b7 clad at ' + ACH_PRIZE_MULT + '\u00d7 the strongest Mythic ever forged</div>' +
+      '<div class="tiny" style="color:#8f98a9;margin-top:5px">It will never be forged again.</div></div>';
   }
 
   if (rec.guild) {
@@ -9541,7 +10494,7 @@ function packRoster() {
       Math.round(r.x), Math.round(r.z), Math.round(r.respect), Math.round(r.kills),
       Math.round(r.quests), Math.round(r.bosses), Math.round(r.raids), r.deaths, r.best,
       r.title, r.sk, r.hr, r.z2, r.pvp, +(r.gen || .5).toFixed(3), +(r.rel || 0).toFixed(3),
-      r.asked || 0]);
+      r.asked || 0, Math.round(r.earn || 0), packLife(r.lf), achPack(r.ach || newAchBits()), r.achS || 0]);
   }
   return out;
 }
@@ -9557,8 +10510,10 @@ function unpackRoster(arr) {
       respect: a[13], kills: a[14], quests: a[15], bosses: a[16], raids: a[17],
       deaths: a[18], best: a[19], title: a[20], sk: a[21], hr: a[22], z2: a[23], pvp: a[24] || 0,
       gen: a[25] == null ? .5 : a[25], rel: a[26] || 0, asked: a[27] || 0,
+      earn: a[28] || 0, lf: unpackLife(a[29]), ach: achUnpack(a[30]), achS: a[31] || 0,
       av: null, online: 1, hof: 0, mythicAt: 0,
     });
+    achRecount(ROSTER[ROSTER.length - 1]);
   }
 }
 function packGuilds() {
@@ -9581,7 +10536,7 @@ function saveGame() {
         milestone: SEASON.milestone, ascended: SEASON.ascended, ov: SEASON.ov },
       mythic: Array.from(MYTHIC_HOLDERS),
       firsts: FIRSTS, firstN: FIRST_N,
-      eternal: ETERNAL,
+      eternal: ETERNAL, achFirst: ACH_FIRST,
       set: SET,
       p: {
         n: p.name, c: p.cls, lv: p.level, xp: p.xp, gold: p.gold,
@@ -9590,6 +10545,7 @@ function saveGame() {
         guild: p.guild, respect: p.respect, playtime: p.playtime, stats: p.stats, title: p.title || '',
         autoOn: p.autoOn, autoMode: p.autoMode, x: p.x, z: p.z,
         skin: p.skin, hair: p.hair, seenZones: p.seenZones, mythic: p.mythic,
+        life: packLife(p.life), ach: achPack(p.ach || newAchBits()), achS: p.achS || 0,
       },
       roster: packRoster(), guilds: packGuilds(),
       lock: RAID_LOCK, wars: WAR_LOG.slice(0, 30),
@@ -9616,6 +10572,7 @@ function applySave(d) {
   FIRST_N = d.firstN || Object.keys(FIRSTS).length;
   // relics are the one thing that outlives a season, so they load from their own key
   ETERNAL.p = (d.eternal && d.eternal.p) || []; ETERNAL.ai = (d.eternal && d.eternal.ai) || [];
+  ACH_FIRST = d.achFirst || null;      // the Testament is forged once in the life of a save
   Object.assign(SET, d.set || {});
   R.quality = SET.quality;
   A.volMusic = SET.volm; A.volSfx = SET.vols;
@@ -9636,6 +10593,8 @@ function applySave(d) {
   p.autoOn = !!s.autoOn; p.autoMode = s.autoMode || 'all';
   p.skin = s.skin || 0; p.hair = s.hair || 0; p.seenZones = s.seenZones || {}; p.mythic = s.mythic || 0;
   p.title = s.title || '';   // a first-blood title you earned is worn until the season wipes
+  /* the board and the ledger behind it outlive every season this save has seen */
+  p.life = unpackLife(s.life); p.ach = achUnpack(s.ach); p.achS = s.achS || 0; achRecount(p);
   p.x = s.x != null ? s.x : p.x; p.z = s.z != null ? s.z : p.z; p.y = groundH(p.x, p.z);
   p.st = calcStats(p); p.resMax = resourceMax(p); p.hp = p.st.hpMax;
   p.res = CLASS_BY[p.cls].res === 'rage' ? 0 : p.resMax;
@@ -9669,6 +10628,8 @@ function playerOffline(ms) {
   const before = { lv: p.level, gold: p.gold, gs: p.st.gs, items: 0 };
   // idle earns at 62% of active pace — being there still matters
   const EFF = 0.62;
+  // time away is still time adventuring, the same as it is for the other thousand
+  playerLedger(p).play += secs;
   const step = Math.min(120, Math.max(10, secs / 900));
   const n = Math.min(Math.ceil(secs / step), 2000);
   const realStep = secs / n;
@@ -9683,7 +10644,8 @@ function playerOffline(ms) {
     p.xp += lp * xpNeed(p.level);
     while (p.xp >= xpNeed(p.level)) { p.xp -= xpNeed(p.level); p.level++; }
     if (lvBefore < ASCEND_LEVEL && p.level >= ASCEND_LEVEL) tryAscend(p);
-    p.gold += (3.2 + p.level * 1.4) * realStep * 0.34 * EFF;
+    const gained = (3.2 + p.level * 1.4) * realStep * 0.34 * EFF;
+    p.gold += gained; p.stats.goldEarned += gained;   // offline gold used not to count as earned
     p.kills += realStep * 0.30 * EFF;
     // loot rolls
     if (rng.f() < 0.055 * realStep * EFF) {
@@ -9696,15 +10658,23 @@ function playerOffline(ms) {
       if (!cur || it.sc > cur.sc) {
         p.gear[it.sl] = it; items++;
         if (tier >= 5) { p.mythic = 1; metaClaimMythic(p); }
-      } else p.gold += it.val;
+      } else { p.gold += it.val; p.stats.itemsGone = (p.stats.itemsGone || 0) + 1; }
       p.stats.itemsFound++;
+      achNoteLoot(p, tier);
       p.st = calcStats(p);
     }
     p.doneCount += 0.055 * realStep * EFF * 0.34;
     p.bossKills += 0.010 * realStep * EFF * 0.11;
     p.stats.raidsDone += 0.0042 * realStep * EFF * 0.09;
     p.respect += 0.06 * (1 + p.level / 90) * realStep * EFF;
+    /* Idling is still walking, and it is still dying now and then -- both used to
+       read as zero, which left two whole achievement tracks unreachable for
+       anyone who plays this the way it is meant to be played. The 62% earn rate
+       is already the price of being away; deaths here cost nothing further. */
+    p.stats.distance += realStep * 4.2 * EFF;
+    p.deaths += 0.0025 * realStep * EFF * 0.42;
   }
+  p.deaths = Math.round(p.deaths);
   p.gold = Math.round(p.gold); p.kills = Math.round(p.kills);
   p.doneCount = Math.round(p.doneCount); p.bossKills = Math.round(p.bossKills);
   p.stats.raidsDone = Math.round(p.stats.raidsDone);

@@ -67,6 +67,34 @@ whether you were one of the ones left standing.
 
 Then everyone — you included — restarts at level 1 with nothing.
 
+### What the wipe cannot take
+
+The same thousand people come back. Names, temperament and skill persist across every
+season the world has ever run, and behind each name is a permanent ledger — everything
+they have ever killed, cleared, earned, walked and won.
+
+On top of that ledger sit **250 achievements**, held for you and for all thousand of
+them, forever. Levels reset. Gear resets. Achievements do not. They are paced so that
+somebody good closes the whole board at around **season five** — a handful land in your
+first hour, the last of them are five worlds away.
+
+At every season's end a fourth crown is handed out: the **Achievement Crown**, to
+whoever earned the most *during* that season — not whoever holds the most, so a veteran
+with a full board cannot coast to it.
+
+And the first adventurer in the world to close all 250 is handed **the Testament**: a
+full set forged at **5× the strongest Mythic the world has ever made**, which carries
+across every season after, the way an Eternal relic does. It is forged exactly once, and
+then never again.
+
+### Mythic gets better every season
+
+Mythic is not a fixed prize. Each season's forging is **6.2% stronger than the one
+before**, compounding without limit — the three Ascendants of season twelve wear gear
+that would have been unimaginable in season one. What the first three earn is theirs for
+that season and dies with it; the next three inherit a higher bar. Eternal relics are
+pegged 16% above the running Mythic peak, so the Overlord's rewards climb with it.
+
 A **seven real day** clock still runs as an outer backstop: if nobody reaches level 200
 in a week, the season ends on the timer and crowns the same three titles.
 
@@ -93,10 +121,14 @@ earning while the tab is closed. Turn it off any time and take over mid-fight.
 | **Ascendants** | Mythic is not a drop. The **first 3 adventurers to reach level 200** are handed it, and claiming the third seat starts the season's ten-minute final call |
 | **The Overlord** | A one-shot last stand between the crowns and the new season: 1001 against one boss, self-calibrated to a near-even fight, survivors only |
 | **Eternal** | A 7th rarity tier above Mythic, taken off the Overlord by those who survive it — the only gear that carries across the season wipe |
+| **Achievements** | **250** of them across 10 categories, permanent for you and for all 1000 AI adventurers — the only progress a season wipe cannot take. Paced at roughly five seasons to close the board |
+| **The Testament** | The first in the world to finish all 250 is clad at **5×** the strongest Mythic ever forged, kept across every season after. One only, ever |
+| **Four crowns** | Champion of Levels, Champion of Gear, the Trailblazer, and the **Achievement Crown** — most earned during the season, not most held — plus the crowned clan |
+| **Mythic escalation** | Every season's Mythic forging is 6.2% stronger than the last, compounding forever |
 | **Progression** | No level cap. No gear cap. The race to 200 is the ceiling |
 | **Social** | Clans with respect points, automatic clan wars, a live trade post, incoming trade offers, world/guild/trade chat |
 | **Whispers** | Click any adventurer to give them gold or an item, or to ask them for one. They answer in their own voice and can refuse — and they whisper you with requests of their own |
-| **Leaderboards** | Hall of Fame top 100 (level, class, gear score, best rarity, clan, gold), top 20 clans with full rosters, the Ascendant registry, and a permanent archive of every past season's three crowns |
+| **Leaderboards** | Hall of Fame top 100 (level, class, gear score, best rarity, clan, gold), top 20 clans with full rosters, the Ascendant registry, the First Blood board, the achievement board with all 1001 ranked, and a permanent archive of every past season's crowns |
 | **Audio** | A live procedural orchestral score — motif-based composition that changes for towns, wilds, combat, bosses, raids, night and victory. Not a single recorded sample |
 | **Graphics** | Custom WebGL2 renderer: MSAA, HDR pipeline, fitted shadow maps with PCF, instanced geometry, wind-animated grass, animated water with fresnel and sun glints, volumetric-ish sky with clouds and stars, ACES tonemapping, bloom and an unsharp pass for crisp phone panels |
 | **Mobile** | Built for touch first: dynamic virtual stick, swipe camera, pinch zoom, tap-to-target, safe-area aware, three quality tiers with resolution scaling |
@@ -145,6 +177,7 @@ src/00_head.html    markup + all CSS
 src/01_core.js      math, seeded RNG, gradient noise, formatting
 src/02_audio.js     the procedural score engine and synthesised SFX
 src/03_content.js   classes, items, quests, bosses, raids, zones, name banks
+src/03b_ach.js      the 250 achievements, the lifetime ledger and its save encoding
 src/04_world.js     heightfield, biomes, roads, towns, prop scatter, navigation
 src/05_gfx.js       WebGL2 core: shaders, render targets, shadows, post
 src/06_scene.js     meshes, terrain streaming, character rig, grass, particles

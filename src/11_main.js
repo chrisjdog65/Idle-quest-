@@ -17,7 +17,7 @@ function packRoster() {
       Math.round(r.x), Math.round(r.z), Math.round(r.respect), Math.round(r.kills),
       Math.round(r.quests), Math.round(r.bosses), Math.round(r.raids), r.deaths, r.best,
       r.title, r.sk, r.hr, r.z2, r.pvp, +(r.gen || .5).toFixed(3), +(r.rel || 0).toFixed(3),
-      r.asked || 0]);
+      r.asked || 0, Math.round(r.earn || 0), packLife(r.lf), achPack(r.ach || newAchBits()), r.achS || 0]);
   }
   return out;
 }
@@ -33,8 +33,10 @@ function unpackRoster(arr) {
       respect: a[13], kills: a[14], quests: a[15], bosses: a[16], raids: a[17],
       deaths: a[18], best: a[19], title: a[20], sk: a[21], hr: a[22], z2: a[23], pvp: a[24] || 0,
       gen: a[25] == null ? .5 : a[25], rel: a[26] || 0, asked: a[27] || 0,
+      earn: a[28] || 0, lf: unpackLife(a[29]), ach: achUnpack(a[30]), achS: a[31] || 0,
       av: null, online: 1, hof: 0, mythicAt: 0,
     });
+    achRecount(ROSTER[ROSTER.length - 1]);
   }
 }
 function packGuilds() {
@@ -57,7 +59,7 @@ function saveGame() {
         milestone: SEASON.milestone, ascended: SEASON.ascended, ov: SEASON.ov },
       mythic: Array.from(MYTHIC_HOLDERS),
       firsts: FIRSTS, firstN: FIRST_N,
-      eternal: ETERNAL,
+      eternal: ETERNAL, achFirst: ACH_FIRST,
       set: SET,
       p: {
         n: p.name, c: p.cls, lv: p.level, xp: p.xp, gold: p.gold,
@@ -66,6 +68,7 @@ function saveGame() {
         guild: p.guild, respect: p.respect, playtime: p.playtime, stats: p.stats, title: p.title || '',
         autoOn: p.autoOn, autoMode: p.autoMode, x: p.x, z: p.z,
         skin: p.skin, hair: p.hair, seenZones: p.seenZones, mythic: p.mythic,
+        life: packLife(p.life), ach: achPack(p.ach || newAchBits()), achS: p.achS || 0,
       },
       roster: packRoster(), guilds: packGuilds(),
       lock: RAID_LOCK, wars: WAR_LOG.slice(0, 30),
@@ -92,6 +95,7 @@ function applySave(d) {
   FIRST_N = d.firstN || Object.keys(FIRSTS).length;
   // relics are the one thing that outlives a season, so they load from their own key
   ETERNAL.p = (d.eternal && d.eternal.p) || []; ETERNAL.ai = (d.eternal && d.eternal.ai) || [];
+  ACH_FIRST = d.achFirst || null;      // the Testament is forged once in the life of a save
   Object.assign(SET, d.set || {});
   R.quality = SET.quality;
   A.volMusic = SET.volm; A.volSfx = SET.vols;
@@ -112,6 +116,8 @@ function applySave(d) {
   p.autoOn = !!s.autoOn; p.autoMode = s.autoMode || 'all';
   p.skin = s.skin || 0; p.hair = s.hair || 0; p.seenZones = s.seenZones || {}; p.mythic = s.mythic || 0;
   p.title = s.title || '';   // a first-blood title you earned is worn until the season wipes
+  /* the board and the ledger behind it outlive every season this save has seen */
+  p.life = unpackLife(s.life); p.ach = achUnpack(s.ach); p.achS = s.achS || 0; achRecount(p);
   p.x = s.x != null ? s.x : p.x; p.z = s.z != null ? s.z : p.z; p.y = groundH(p.x, p.z);
   p.st = calcStats(p); p.resMax = resourceMax(p); p.hp = p.st.hpMax;
   p.res = CLASS_BY[p.cls].res === 'rage' ? 0 : p.resMax;
@@ -145,6 +151,8 @@ function playerOffline(ms) {
   const before = { lv: p.level, gold: p.gold, gs: p.st.gs, items: 0 };
   // idle earns at 62% of active pace — being there still matters
   const EFF = 0.62;
+  // time away is still time adventuring, the same as it is for the other thousand
+  playerLedger(p).play += secs;
   const step = Math.min(120, Math.max(10, secs / 900));
   const n = Math.min(Math.ceil(secs / step), 2000);
   const realStep = secs / n;
@@ -159,7 +167,8 @@ function playerOffline(ms) {
     p.xp += lp * xpNeed(p.level);
     while (p.xp >= xpNeed(p.level)) { p.xp -= xpNeed(p.level); p.level++; }
     if (lvBefore < ASCEND_LEVEL && p.level >= ASCEND_LEVEL) tryAscend(p);
-    p.gold += (3.2 + p.level * 1.4) * realStep * 0.34 * EFF;
+    const gained = (3.2 + p.level * 1.4) * realStep * 0.34 * EFF;
+    p.gold += gained; p.stats.goldEarned += gained;   // offline gold used not to count as earned
     p.kills += realStep * 0.30 * EFF;
     // loot rolls
     if (rng.f() < 0.055 * realStep * EFF) {
@@ -172,15 +181,23 @@ function playerOffline(ms) {
       if (!cur || it.sc > cur.sc) {
         p.gear[it.sl] = it; items++;
         if (tier >= 5) { p.mythic = 1; metaClaimMythic(p); }
-      } else p.gold += it.val;
+      } else { p.gold += it.val; p.stats.itemsGone = (p.stats.itemsGone || 0) + 1; }
       p.stats.itemsFound++;
+      achNoteLoot(p, tier);
       p.st = calcStats(p);
     }
     p.doneCount += 0.055 * realStep * EFF * 0.34;
     p.bossKills += 0.010 * realStep * EFF * 0.11;
     p.stats.raidsDone += 0.0042 * realStep * EFF * 0.09;
     p.respect += 0.06 * (1 + p.level / 90) * realStep * EFF;
+    /* Idling is still walking, and it is still dying now and then -- both used to
+       read as zero, which left two whole achievement tracks unreachable for
+       anyone who plays this the way it is meant to be played. The 62% earn rate
+       is already the price of being away; deaths here cost nothing further. */
+    p.stats.distance += realStep * 4.2 * EFF;
+    p.deaths += 0.0025 * realStep * EFF * 0.42;
   }
+  p.deaths = Math.round(p.deaths);
   p.gold = Math.round(p.gold); p.kills = Math.round(p.kills);
   p.doneCount = Math.round(p.doneCount); p.bossKills = Math.round(p.bossKills);
   p.stats.raidsDone = Math.round(p.stats.raidsDone);

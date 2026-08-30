@@ -79,6 +79,15 @@ const PANEL_RENDER = {
     ['Items Found', st.itemsFound], ['Gold Earned', fmt(st.goldEarned)], ['Distance Travelled', fmt(st.distance) + ' m'],
     ['Time Played', dur(p.playtime * 1000)], ['Seasons Played', (st.seasons || 0) + 1]];
     for (const [k, v] of rows) h += '<div class="row"><span class="k">' + k + '</span><b>' + v + '</b></div>';
+    // everything above dies with the season; everything below does not
+    h += '<h4 class="sec">For All Time</h4>';
+    const life = [['Achievements', '<span style="color:#ffd766">' + (p.achN || 0) + '</span> <span class="tiny">/ ' + ACH_TOTAL + '</span>'],
+    ['Earned this season', '+' + (p.achS || 0)], ['Lifetime kills', fmt(playerLife(p, 'kills'))],
+    ['Lifetime quests', fmt(playerLife(p, 'quests'))], ['Lifetime bosses', fmt(playerLife(p, 'bosses'))],
+    ['Lifetime gold earned', fmt(playerLife(p, 'earn'))], ['Highest level reached', achStat(p, 'maxLv', true)],
+    ['Best gear score ever', fmt(achStat(p, 'maxGs', true))], ['Ascensions', playerLedger(p).asc],
+    ['Season crowns', playerLedger(p).crowns], ['Eternal relics', ETERNAL.p.length]];
+    for (const [k, v] of life) h += '<div class="row"><span class="k">' + k + '</span><b>' + v + '</b></div>';
     const hof = hallOfFame(POP + 1);
     const rank = hof.findIndex(r => r.isPlayer) + 1;
     h += '<h4 class="sec">Standing</h4><div class="card center"><div style="font-size:26px;font-weight:900;color:var(--gold)">#' + rank + '</div>' +
@@ -447,6 +456,10 @@ const PANEL_RENDER = {
       // seasons archived before the Overlord existed have no c.ov, so guard it
       if (c.blazer) h += '<div class="row"><span class="k">Trailblazer</span><b style="color:#ffd766">' +
         esc(c.blazer.n) + (c.blazer.isPlayer ? ' (you)' : '') + ' · ' + c.blazer.c + ' firsts</b></div>';
+      if (c.ach) h += '<div class="row"><span class="k">Achievement Crown</span><b style="color:#f0c257">' +
+        esc(c.ach.n) + (c.ach.isPlayer ? ' (you)' : '') + ' · +' + c.ach.earned + ' earned</b></div>';
+      if (c.testament) h += '<div class="row"><span class="k">The Testament</span><b class="q6">' +
+        esc(c.testament.n) + (c.testament.isPlayer ? ' (you)' : '') + ' · all ' + (c.achTotal || ACH_TOTAL) + '</b></div>';
       if (c.ov) h += '<div class="row"><span class="k">The Overlord</span><b style="color:' +
         (c.ov.outcome === 2 ? '#7ff2ff' : c.ov.outcome === 1 ? '#d0a0ff' : '#ff5a72') + '">' +
         (c.ov.outcome === 2 ? 'HELD \u00b7 ' + c.ov.alive + ' stood'
@@ -458,6 +471,112 @@ const PANEL_RENDER = {
       }
       h += '<div class="row"><span class="k">You finished</span><b>#' + c.playerRank + ' by level' +
         (c.playerGearRank ? ', #' + c.playerGearRank + ' by gear' : '') + ' · Lv ' + c.playerLv + '</b></div></div>';
+    }
+    return h;
+  },
+
+  /* ---------------------------------------------------------------- ACHIEVEMENTS */
+  ach(tab) {
+    const p = G.player;
+    const held = p.achN || 0, pct = held / ACH_TOTAL * 100;
+    if (tab === 0) {
+      const rank = achPlayerRank();
+      let h = '<div class="card center" style="border-color:#ffd766">' +
+        '<b style="color:#ffd766;font-size:16px">' + held + ' / ' + ACH_TOTAL + '</b>' +
+        '<div class="bar" style="margin:6px 0"><i style="width:' + pct.toFixed(1) + '%;background:linear-gradient(90deg,#f0c257,#ffd766)"></i>' +
+        '<span>' + pct.toFixed(1) + '%</span></div>' +
+        '<div class="tiny">Achievements are the only thing in this world that a season cannot take back. ' +
+        'They stay with your name through every wipe — and through every one of theirs.</div></div>';
+      h += '<div class="grid g3" style="margin:6px 0">' +
+        '<div class="card center"><b>#' + rank + '</b><div class="tiny">of ' + (POP + 1) + ' adventurers</div></div>' +
+        '<div class="card center"><b style="color:#ffd766">' + (p.achS || 0) + '</b><div class="tiny">earned this season</div></div>' +
+        '<div class="card center"><b>' + (ACH_TOTAL - held) + '</b><div class="tiny">still to do</div></div></div>';
+      h += '<h4 class="sec">By Category</h4>';
+      for (const c of ACH_CATS) {
+        const rows = ACH_BY_CAT[c.k];
+        const got = rows.filter(a => achHas(p.ach, a.id)).length;
+        h += '<div style="margin:5px 0"><div style="display:flex;justify-content:space-between;font-size:12px">' +
+          '<b style="color:' + c.c + '">' + c.n + '</b><span class="tiny">' + got + ' / ' + rows.length + '</span></div>' +
+          '<div class="bar sm"><i style="width:' + (got / rows.length * 100).toFixed(1) + '%;background:' + c.c + '"></i></div></div>';
+      }
+      // the handful you are actually closest to finishing
+      const next = ACH.filter(a => !achHas(p.ach, a.id))
+        .map(a => ({ a, f: Math.min(1, achStat(p, a.stat, true) / a.need) }))
+        .sort((x, y) => y.f - x.f).slice(0, 8);
+      if (next.length) {
+        h += '<h4 class="sec">Closest to Done</h4>';
+        for (const { a, f } of next) {
+          h += '<div style="margin:5px 0"><div style="display:flex;justify-content:space-between;gap:8px;font-size:12px">' +
+            '<b style="color:' + ACH_CAT_BY[a.cat].c + '">' + esc(a.n) + '</b>' +
+            '<span class="tiny">' + achProgTxt(p, a, true) + '</span></div>' +
+            '<div class="bar sm"><i style="width:' + (f * 100).toFixed(1) + '%;background:' + ACH_CAT_BY[a.cat].c + '"></i></div>' +
+            '<div class="tiny" style="opacity:.7">' + esc(a.d) + '</div></div>';
+        }
+      }
+      return h;
+    }
+    if (tab === 1) {
+      let h = '<div class="tiny">All ' + ACH_TOTAL + ' of them. Gold is earned; grey is waiting.</div>';
+      for (const c of ACH_CATS) {
+        const rows = ACH_BY_CAT[c.k];
+        const got = rows.filter(a => achHas(p.ach, a.id)).length;
+        h += '<h4 class="sec" style="color:' + c.c + '">' + c.n + ' <span class="tiny" style="color:#8f98a9">' +
+          got + '/' + rows.length + ' · ' + esc(c.d) + '</span></h4>';
+        for (const a of rows) {
+          const done = achHas(p.ach, a.id);
+          h += '<div class="row"><span class="k" style="' + (done ? 'color:' + c.c + ';font-weight:700' : 'opacity:.55') + '">' +
+            (done ? '★ ' : '☆ ') + esc(a.n) + '<div class="tiny" style="opacity:.7;font-weight:400">' + esc(a.d) + '</div></span>' +
+            '<b class="tiny" style="' + (done ? 'color:' + c.c : 'opacity:.6') + '">' + achProgTxt(p, a, true) + '</b></div>';
+        }
+      }
+      return h;
+    }
+    if (tab === 2) {
+      const board = achLeaders(60), season = achSeasonLeaders(10);
+      let h = '<div class="card center" style="border-color:#ffd766"><b style="color:#ffd766">THE ACHIEVEMENT CROWN</b>' +
+        '<div class="tiny" style="margin-top:4px">Crowned at every season\'s end to whoever earned the most achievements <b>during</b> it — ' +
+        'not whoever holds the most. A veteran with a full board cannot coast to it.</div></div>';
+      h += '<h4 class="sec">Earned This Season</h4>';
+      season.forEach((r, i) => {
+        h += '<div class="row' + (r.isPlayer ? ' me' : '') + '"><span class="k">' + (i + 1) + '. ' +
+          CLASS_BY[r.c].ic + ' ' + esc(r.n) + (r.isPlayer ? ' (you)' : '') +
+          (r.g >= 0 && GUILDS[r.g] ? ' <span class="tiny">' + esc(GUILDS[r.g].n) + '</span>' : '') +
+          '</span><b style="color:#ffd766">+' + r.achS + '</b></div>';
+      });
+      h += '<h4 class="sec">Held For All Time</h4><table class="lb"><tr><th>#</th><th>Name</th><th>Class</th><th>Clan</th><th>Held</th><th>Season</th></tr>';
+      board.forEach((r, i) => {
+        h += '<tr class="' + (r.isPlayer ? 'me' : '') + '"><td class="tiny">' + (i + 1) + '</td>' +
+          '<td><b' + (r.done ? ' class="q6"' : '') + '>' + esc(r.n) + (r.isPlayer ? ' (you)' : '') + '</b></td>' +
+          '<td class="tiny">' + CLASS_BY[r.c].n + '</td>' +
+          '<td class="tiny">' + (r.g >= 0 && GUILDS[r.g] ? esc(GUILDS[r.g].n) : '—') + '</td>' +
+          '<td><b style="color:#ffd766">' + r.achN + '</b> <span class="tiny">/ ' + ACH_TOTAL + '</span></td>' +
+          '<td class="tiny">+' + r.achS + '</td></tr>';
+      });
+      return h + '</table>';
+    }
+    // ---- the Testament ----
+    const il = testamentIlvl(), peak = mythicPeakIlvl();
+    let h = '<div class="card center" style="border-color:#7ff2ff"><b class="q6" style="font-size:16px">THE TESTAMENT</b>' +
+      '<div class="tiny" style="margin-top:4px">The first adventurer in the world to close all ' + ACH_TOTAL +
+      ' achievements is handed a full set forged at <b class="q6">' + ACH_PRIZE_MULT + '×</b> the strongest Mythic the world has ever made. ' +
+      'It carries across every season after, the way an Eternal relic does. It is forged exactly once, and then never again.</div></div>';
+    h += '<div class="grid g3" style="margin:6px 0">' +
+      '<div class="card center"><b>' + peak + '</b><div class="tiny">Mythic peak, season ' + SEASON.num + '</div></div>' +
+      '<div class="card center"><b class="q6">' + il + '</b><div class="tiny">Testament item level</div></div>' +
+      '<div class="card center"><b>' + (ACH_TOTAL - held) + '</b><div class="tiny">left for you</div></div></div>';
+    if (ACH_FIRST) {
+      h += '<div class="card center" style="border-color:#7ff2ff;margin-top:8px">' +
+        '<b class="q6" style="font-size:15px">' + esc(ACH_FIRST.n) + (ACH_FIRST.isPlayer ? ' (you)' : '') + '</b>' +
+        '<div class="tiny" style="margin-top:3px">closed the board in Season ' + ACH_FIRST.season +
+        ' and wears the Testament. Nobody else ever will.</div></div>';
+    } else {
+      const lead = achLeaders(5);
+      h += '<h4 class="sec">The Race</h4>';
+      lead.forEach((r, i) => {
+        h += '<div class="row' + (r.isPlayer ? ' me' : '') + '"><span class="k">' + (i + 1) + '. ' + esc(r.n) +
+          (r.isPlayer ? ' (you)' : '') + '</span><b>' + r.achN + ' <span class="tiny">/ ' + ACH_TOTAL + '</span></b></div>';
+      });
+      h += '<div class="tiny center" style="padding:10px;opacity:.8">Unclaimed. It goes to whoever gets there first.</div>';
     }
     return h;
   },
@@ -674,6 +793,20 @@ function showAIInspect(rec) {
     '<div class="row"><span class="k">Raids</span><b>' + fmt(rec.raids) + '</b></div>' +
     '<div class="row"><span class="k">Deaths</span><b>' + fmt(rec.deaths) + '</b></div>' +
     '<div class="row"><span class="k">Respect</span><b>' + fmt(Math.round(rec.respect)) + '</b></div>';
+  /* Their permanent record: this is the only part of them a season does not erase,
+     and it is the reason they are somebody rather than a fresh roll of the dice. */
+  {
+    const lf = rec.lf || newLifeLedger();
+    h += '<h4 class="sec">For All Time</h4>' +
+      '<div class="row"><span class="k">Achievements</span><b style="color:#ffd766">' + (rec.achN || 0) +
+      ' <span class="tiny">/ ' + ACH_TOTAL + '</span></b></div>' +
+      '<div class="row"><span class="k">Earned this season</span><b>+' + (rec.achS || 0) + '</b></div>' +
+      '<div class="row"><span class="k">Seasons played</span><b>' + (lf.seasons + 1) + '</b></div>' +
+      '<div class="row"><span class="k">Lifetime kills</span><b>' + fmt(lifeVal(rec, 'kills')) + '</b></div>' +
+      (lf.crowns ? '<div class="row"><span class="k">Crowns</span><b style="color:var(--gold)">' + lf.crowns + '</b></div>' : '') +
+      (lf.asc ? '<div class="row"><span class="k">Ascensions</span><b class="q5">' + lf.asc + '</b></div>' : '') +
+      (lf.relics ? '<div class="row"><span class="k">Eternal relics</span><b class="q6">' + lf.relics + '</b></div>' : '');
+  }
   // ---- talk to them like a person ----
   const rel = rec.rel || 0;
   const mood = rel > 0.5 ? ['fond of you', '#4ad24a'] : rel > 0.12 ? ['warm', '#9ad2ff']
@@ -831,6 +964,26 @@ function showSeasonEnd(rec) {
       ' claimed this season' + ((rec.firstsTotal || 100) - (rec.firstsTaken || 0) > 0
         ? ' — ' + ((rec.firstsTotal || 100) - (rec.firstsTaken || 0)) + ' were never brought down' : '') +
       (rec.playerFirsts ? ' · you took ' + rec.playerFirsts : '') + '</div></div>';
+  }
+
+  if (rec.ach) {
+    h += '<div class="champ" style="border-color:#f0c257;box-shadow:0 0 40px rgba(240,194,87,.2)">' +
+      '<div class="tiny" style="letter-spacing:.3em;color:#f0c257">THE ACHIEVEMENT CROWN \u2014 MOST EARNED THIS SEASON</div>' +
+      '<div class="cn">' + esc(rec.ach.n) + (rec.ach.isPlayer ? ' <span style="font-size:.5em;color:#4ad24a">(YOU)</span>' : '') + '</div>' +
+      '<div class="tiny" style="color:#c9bda0;margin-top:4px">' + rec.ach.earned + ' achievements earned this season \u00b7 ' +
+      rec.ach.held + ' of ' + (rec.achTotal || ACH_TOTAL) + ' held for all time' +
+      (rec.ach.guild ? ' \u00b7 ' + esc(rec.ach.guild) : '') + '</div>' +
+      '<div class="tiny" style="color:#8f98a9;margin-top:5px">You finished #' + (rec.achRank || '\u2014') +
+      ' with ' + (rec.playerAch || 0) + ' held, ' + (rec.playerAchS || 0) + ' earned this season. ' +
+      'Achievements survive the wipe \u2014 they carry into the next world with you.</div></div>';
+  }
+  if (rec.testament) {
+    h += '<div class="champ" style="border-color:#7ff2ff;box-shadow:0 0 44px rgba(127,242,255,.25)">' +
+      '<div class="tiny" style="letter-spacing:.3em;color:#7ff2ff">THE TESTAMENT \u2014 ALL ' + (rec.achTotal || ACH_TOTAL) + ' CLOSED</div>' +
+      '<div class="cn">' + esc(rec.testament.n) + (rec.testament.isPlayer ? ' <span style="font-size:.5em;color:#4ad24a">(YOU)</span>' : '') + '</div>' +
+      '<div class="tiny" style="color:#c9bda0;margin-top:4px">Closed the board in Season ' + rec.testament.season +
+      ' \u00b7 clad at ' + ACH_PRIZE_MULT + '\u00d7 the strongest Mythic ever forged</div>' +
+      '<div class="tiny" style="color:#8f98a9;margin-top:5px">It will never be forged again.</div></div>';
   }
 
   if (rec.guild) {

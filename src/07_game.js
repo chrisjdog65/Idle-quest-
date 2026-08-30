@@ -337,6 +337,7 @@ function makePlayer(name, clsId) {
     stats: { dmgDone: 0, dmgTaken: 0, healed: 0, goldEarned: 0, itemsFound: 0, questsDone: 0, bossesKilled: 0, raidsDone: 0, pvpWins: 0, distance: 0 },
     autoOn: false, autoMode: 'all', dead: 0, sprint: 1, swim: 0, fill: 0.07, title: '',
     lastTownVisit: 0, seenZones: {}, af: {},
+    life: newLifeLedger(), ach: newAchBits(), achN: 0, achS: 0,
   };
   const hub = POI.hubs[0];
   p.x = hub.x + 40; p.z = hub.z + 34; p.y = groundH(p.x, p.z);
@@ -677,10 +678,12 @@ function giveItem(p, it, quiet) {
     for (let i = 1; i < p.bags.length; i++) if (p.bags[i].sc < p.bags[worst].sc) worst = i;
     const sold = p.bags.splice(worst, 1)[0];
     giveGold(p, sold.val);
+    p.stats.itemsGone = (p.stats.itemsGone || 0) + 1;
     toast('Bag full — sold ' + sold.n + ' for ' + fmt(sold.val) + 'g', 'sys');
   }
   p.bags.push(it);
   p.stats.itemsFound++;
+  achNoteLoot(p, it.t);
   if (it.t === 5) { p.mythic = 1; metaClaimMythic(p); }      // an Eternal must never consume an Ascendant seat
   if (!quiet) {
     sfx('loot', .9, it.t + 1);

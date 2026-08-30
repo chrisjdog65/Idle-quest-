@@ -1,6 +1,6 @@
 // Static guard: catch duplicate top-level declarations across the concatenated parts.
 const fs = require('fs');
-const files = ['01_core.js','02_audio.js','03_content.js','04_world.js','05_gfx.js','06_scene.js',
+const files = ['01_core.js','02_audio.js','03_content.js','03b_ach.js','04_world.js','05_gfx.js','06_scene.js',
   '07_game.js','08_meta.js','09_ui.js','09b_panels.js','10_auto.js','11_main.js'];
 const seen = new Map(); let bad = 0;
 for (const f of files) {

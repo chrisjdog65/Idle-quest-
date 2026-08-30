@@ -714,11 +714,15 @@ const PANEL_DEF = {
   guild: { t: 'Clan', tabs: ['My Clan', 'Clans', 'Wars'] },
   raid: { t: 'Raids & Bosses', tabs: ['Raids', 'World Bosses'] },
   hof: { t: 'Hall of Fame', tabs: ['Top 100', 'Top 20 Clans', 'Ascendants', 'First Blood', 'Past Seasons'] },
+  ach: { t: 'Achievements', tabs: ['Your Board', 'All 250', 'Leaders', 'The Testament'] },
   social: { t: 'Adventurers', tabs: ['Online', 'Whispers', 'Chat'] },
   opts: { t: 'Settings', tabs: ['Game', 'Graphics', 'Audio', 'About'] },
 };
 function panelOpen(which) {
-  if (PANEL === which) { panelClose(); return; }
+  if (PANEL === which && !PANEL_MODAL) { panelClose(); return; }
+  /* An open inspect sheet suppresses renderPanel. Opening a panel from the bar
+     without clearing it left the sheet's body sitting under the new panel's tabs. */
+  PANEL_MODAL = false;
   PANEL = which;
   const def = PANEL_DEF[which];
   $('ptitle').textContent = def.t;
