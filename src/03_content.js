@@ -456,6 +456,30 @@ function buildContent() {
   buildZones(); buildQuests(); buildBosses(); buildRaids();
 }
 
+/* ------------------------------ FIRST BLOOD ------------------------------
+   One hundred world bosses. One hundred firsts. Each claimable exactly once, by
+   exactly one of the thousand, and never again for the rest of the season.
+
+   The season's only other scarcity -- the three Ascendant seats -- resolves in the
+   last ten minutes. This is the same shape (a ledger of holders, an ordinal, a
+   chat line, a title you wear) spread across the whole four and a half hours, so
+   that the middle of a season has something in it that can be taken from you.
+
+   It paces itself with no tuning: bosses are built in nine escalating tiers
+   (lv = zone.lvMin + 4 + tier*3), and advanceRec already sends adventurers to
+   lairs by level fit -- so tier 0 falls in the opening minutes while the tier-8
+   lairs out in the high zones are often still unclaimed when the crowns are read. */
+const FB = {
+  RATE: 0.0040,     // base per-second chance a qualified hunter finishes their boss
+  SKILL: 0.28,      // how much skill matters. deliberately mild: the race should be
+                    //   about who gets to the level first, not who was born best
+  OVER: 12,         // levels above the boss at which a clear is comfortable
+  OVERMAX: 1.6,
+  TIER: 1.15,       // each escalating tier is this much slower to bring down, so the
+                    //   deep lairs stay contested instead of the board emptying at the
+                    //   wire and the mechanic going dead in the season's tensest hour
+};
+
 /* ------------------------------ THE OVERLORD ------------------------------
    The grand finale. When the season's crowns are handed out, every adventurer in
    the world -- all 1000 of them, and you -- takes the field against one thing.

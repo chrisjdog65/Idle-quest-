@@ -185,7 +185,8 @@ function updateHUD(dt) {
   if (hudT > 0) { updateActionBar(); return; }
   hudT = 0.2;
   $('pName').textContent = p.name;
-  $('pGuild').textContent = p.guild != null && GUILDS[p.guild] ? GUILDS[p.guild].n : '<no clan>';
+  $('pGuild').innerHTML = (p.guild != null && GUILDS[p.guild] ? esc(GUILDS[p.guild].n) : '&lt;no clan&gt;') +
+    (p.title ? ' <b style="color:#ffd766">· ' + esc(p.title) + '</b>' : '');
   $('gold').innerHTML = fmt(p.gold) + ' <span style="opacity:.7">g</span>';
   $('sNum').textContent = SEASON.num;
   const fin = seasonFinalCall();
@@ -335,6 +336,14 @@ function drawOverlay() {
       g.font = '' + (9 * scale) + 'px Trebuchet MS,sans-serif';
       g.fillStyle = '#9aa3b4';
       g.fillText('‹' + rec.lv + '› ' + (gname || CLASS_BY[rec.c].n), sx, sy + 11 * scale);
+      // a first-blood title is worn in gold, and is the reason rec.title exists at all
+      if (rec.title) {
+        g.font = '700 ' + (8.5 * scale) + 'px Trebuchet MS,sans-serif';
+        g.fillStyle = '#000'; g.globalAlpha = alpha * .5;
+        g.fillText(rec.title, sx + 1, sy + 21 * scale + 1);
+        g.globalAlpha = alpha; g.fillStyle = '#ffd766';
+        g.fillText(rec.title, sx, sy + 21 * scale);
+      }
     } else {
       const w = (e.kind === 'boss' ? 72 : 46) * scale, h = 4.6 * scale;
       const frac = clamp(e.hp / e.hpMax, 0, 1);
@@ -483,7 +492,9 @@ function drawMinimap(dt) {
     const m = w2m(poi.x, poi.z);
     g.font = '11px sans-serif'; g.textAlign = 'center';
     const ic = poi.k === 'hub' ? '🏰' : poi.k === 'raid' ? '🐉' : poi.k === 'lair' ? '☠' : poi.k === 'ruin' ? '🗿' : '';
-    if (ic) g.fillText(ic, m[0], m[1] + 4);
+    // a lair whose first blood is already taken is spent: it greys out and stays that way
+    const spent = poi.k === 'lair' && poi.boss != null && FIRSTS[poi.boss];
+    if (ic) { g.globalAlpha = spent ? .3 : 1; g.fillText(ic, m[0], m[1] + 4); g.globalAlpha = 1; }
     else { g.fillStyle = 'rgba(220,120,60,.8)'; g.fillRect(m[0] - 1.5, m[1] - 1.5, 3, 3); }
   }
   // AI adventurers (roster, not just avatars — the world feels populated)
@@ -688,7 +699,7 @@ const PANEL_DEF = {
   map: { t: 'World Map', tabs: ['Map', 'Zones'] },
   guild: { t: 'Clan', tabs: ['My Clan', 'Clans', 'Wars'] },
   raid: { t: 'Raids & Bosses', tabs: ['Raids', 'World Bosses'] },
-  hof: { t: 'Hall of Fame', tabs: ['Top 100', 'Top 20 Clans', 'Ascendants', 'Past Seasons'] },
+  hof: { t: 'Hall of Fame', tabs: ['Top 100', 'Top 20 Clans', 'Ascendants', 'First Blood', 'Past Seasons'] },
   social: { t: 'Adventurers', tabs: ['Online', 'Whispers', 'Chat'] },
   opts: { t: 'Settings', tabs: ['Game', 'Graphics', 'Audio', 'About'] },
 };

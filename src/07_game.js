@@ -304,7 +304,7 @@ function makePlayer(name, clsId) {
     quests: [], done: {}, doneCount: 0, kills: 0, deaths: 0, bossKills: 0, raidKills: 0,
     guild: null, respect: 0, playtime: 0, mythic: 0,
     stats: { dmgDone: 0, dmgTaken: 0, healed: 0, goldEarned: 0, itemsFound: 0, questsDone: 0, bossesKilled: 0, raidsDone: 0, pvpWins: 0, distance: 0 },
-    autoOn: false, autoMode: 'all', dead: 0, sprint: 1, swim: 0, fill: 0.07,
+    autoOn: false, autoMode: 'all', dead: 0, sprint: 1, swim: 0, fill: 0.07, title: '',
     lastTownVisit: 0, seenZones: {}, af: {},
   };
   const hub = POI.hubs[0];
@@ -737,6 +737,7 @@ function onMobKilled(m, p) {
     for (const it of loot) giveItem(p, it);
     metaBossKilled(p, bd);
     questProgress(p, 'boss', m.name, 1);
+    claimFirst(m.bossId, null);          // first blood, if nobody in the world got here first
     BOSS_STATE[m.bossId] = G.t + (bd ? bd.respawn : 120);
   } else {
     if (Math.random() < (m.rank === 1 ? .85 : .34) + (p.af.lucky || 0) * .004) {

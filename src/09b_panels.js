@@ -368,6 +368,43 @@ const PANEL_RENDER = {
       }
       return h;
     }
+    if (tab === 3) {
+      const total = DB.bosses.length, taken = FIRST_N, left = total - taken;
+      let h = '<div class="card center" style="border-color:#ffd766"><b style="color:#ffd766;font-size:16px">FIRST BLOOD</b>' +
+        '<div class="tiny" style="margin-top:4px">One hundred world bosses. The <b>first</b> adventurer in the world to bring each one down takes its name, and wears it for the rest of the season. Each is claimable exactly once.</div>' +
+        '<div class="grid g3" style="margin-top:8px">' +
+        '<div class="card center"><b style="color:#ffd766">' + taken + '</b><div class="tiny">claimed</div></div>' +
+        '<div class="card center"><b>' + left + '</b><div class="tiny">still standing</div></div>' +
+        '<div class="card center"><b class="' + (firstsBy(G.player.name) ? 'q4' : '') + '">' + firstsBy(G.player.name) +
+        '</b><div class="tiny">yours</div></div></div></div>';
+      const lead = firstsLeaders();
+      if (lead.length) {
+        h += '<h4 class="sec">Trailblazers</h4>';
+        lead.slice(0, 10).forEach((l, i) => {
+          h += '<div class="row' + (l.isPlayer ? ' me' : '') + '"><span class="k">' + (i + 1) + '. ' + esc(l.n) +
+            (l.isPlayer ? ' (you)' : '') + (l.g >= 0 && GUILDS[l.g] ? ' <span class="tiny">' + esc(GUILDS[l.g].n) + '</span>' : '') +
+            '</span><b style="color:#ffd766">' + l.c + '</b></div>';
+        });
+      }
+      h += '<h4 class="sec">The Board</h4><table class="lb"><tr><th>#</th><th>World Boss</th><th>Lv</th><th>Zone</th><th>First Blood</th></tr>';
+      // unclaimed first: those are the ones still worth walking to
+      const ids = DB.bosses.map(b => b.id).sort((a, b) => {
+        const fa = FIRSTS[a] ? 1 : 0, fb = FIRSTS[b] ? 1 : 0;
+        if (fa !== fb) return fa - fb;
+        if (fa) return FIRSTS[a].place - FIRSTS[b].place;
+        return DB.bosses[a].lv - DB.bosses[b].lv;
+      });
+      for (const id of ids) {
+        const b = DB.bosses[id], f = FIRSTS[id];
+        h += '<tr class="' + (f && f.i === -1 ? 'me' : '') + '"><td class="tiny">' + (f ? f.place : '—') + '</td>' +
+          '<td><b style="color:' + (f ? '#8f98a9' : '#ffd766') + '">' + esc(b.n) + '</b><div class="tiny">' + esc(b.t) + '</div></td>' +
+          '<td>' + b.lv + '</td><td class="tiny">' + esc(DB.zones[b.z].n) + '</td>' +
+          '<td>' + (f ? '<b style="color:' + (f.i === -1 ? '#4ad24a' : '#c9bda0') + '">' + esc(f.n) + '</b><div class="tiny">at level ' + f.lv + '</div>'
+            : '<b style="color:#ffd766">UNCLAIMED</b>') + '</td></tr>';
+      }
+      h += '</table>';
+      return h;
+    }
     let h = '<div class="tiny">Every season ever played, kept forever — newest first.</div>';
     if (!SEASON.champions.length) return h + '<div class="tiny center" style="padding:26px">No season has ended yet.<br>Season ' +
       SEASON.num + ' ends in <b style="color:var(--gold)">' + dur(seasonLeft()) + '</b>.</div>';
@@ -408,6 +445,8 @@ const PANEL_RENDER = {
       h += '<div class="row"><span class="k">Crowned Clan</span><b>' + esc(c.guild ? c.guild.n : '—') +
         (c.guild && c.guild.isPlayerGuild ? ' (yours)' : '') + (c.guild ? ' · ' + fmt(c.guild.respect) + ' respect' : '') + '</b></div>';
       // seasons archived before the Overlord existed have no c.ov, so guard it
+      if (c.blazer) h += '<div class="row"><span class="k">Trailblazer</span><b style="color:#ffd766">' +
+        esc(c.blazer.n) + (c.blazer.isPlayer ? ' (you)' : '') + ' · ' + c.blazer.c + ' firsts</b></div>';
       if (c.ov) h += '<div class="row"><span class="k">The Overlord</span><b style="color:' +
         (c.ov.outcome === 2 ? '#7ff2ff' : c.ov.outcome === 1 ? '#d0a0ff' : '#ff5a72') + '">' +
         (c.ov.outcome === 2 ? 'HELD \u00b7 ' + c.ov.alive + ' stood'
@@ -780,6 +819,18 @@ function showSeasonEnd(rec) {
   } else {
     h += crown('CHAMPION OF LEVELS', rec.champ, 'Highest level in the world');
     h += crown('CHAMPION OF GEAR', rec.gearChamp, 'Greatest gear power in the world');
+  }
+
+  if (rec.blazer) {
+    h += '<div class="champ" style="border-color:#ffd766;box-shadow:0 0 40px rgba(255,215,102,.2)">' +
+      '<div class="tiny" style="letter-spacing:.3em;color:#ffd766">THE TRAILBLAZER — MOST FIRST BLOODS</div>' +
+      '<div class="cn">' + esc(rec.blazer.n) + (rec.blazer.isPlayer ? ' <span style="font-size:.5em;color:#4ad24a">(YOU)</span>' : '') + '</div>' +
+      '<div class="tiny" style="color:#c9bda0;margin-top:4px">' + rec.blazer.c + ' world bosses killed before anyone else' +
+      (rec.blazer.guild ? ' · ' + esc(rec.blazer.guild) : '') + '</div>' +
+      '<div class="tiny" style="color:#8f98a9;margin-top:5px">' + (rec.firstsTaken || 0) + ' of ' + (rec.firstsTotal || 100) +
+      ' claimed this season' + ((rec.firstsTotal || 100) - (rec.firstsTaken || 0) > 0
+        ? ' — ' + ((rec.firstsTotal || 100) - (rec.firstsTaken || 0)) + ' were never brought down' : '') +
+      (rec.playerFirsts ? ' · you took ' + rec.playerFirsts : '') + '</div></div>';
   }
 
   if (rec.guild) {

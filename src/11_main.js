@@ -56,13 +56,14 @@ function saveGame() {
       season: { num: SEASON.num, start: SEASON.start, ended: SEASON.ended, champions: SEASON.champions,
         milestone: SEASON.milestone, ascended: SEASON.ascended, ov: SEASON.ov },
       mythic: Array.from(MYTHIC_HOLDERS),
+      firsts: FIRSTS, firstN: FIRST_N,
       eternal: ETERNAL,
       set: SET,
       p: {
         n: p.name, c: p.cls, lv: p.level, xp: p.xp, gold: p.gold,
         gear: p.gear, bags: p.bags, quests: p.quests, done: p.done, doneCount: p.doneCount,
         kills: p.kills, deaths: p.deaths, bossKills: p.bossKills, raidKills: p.raidKills,
-        guild: p.guild, respect: p.respect, playtime: p.playtime, stats: p.stats,
+        guild: p.guild, respect: p.respect, playtime: p.playtime, stats: p.stats, title: p.title || '',
         autoOn: p.autoOn, autoMode: p.autoMode, x: p.x, z: p.z,
         skin: p.skin, hair: p.hair, seenZones: p.seenZones, mythic: p.mythic,
       },
@@ -86,6 +87,9 @@ function applySave(d) {
   SEASON.milestone = d.season.milestone || 0; SEASON.ascended = d.season.ascended || [];
   SEASON.ov = d.season.ov || null;
   MYTHIC_HOLDERS.clear(); (d.mythic || []).forEach(x => MYTHIC_HOLDERS.add(x));
+  for (const k in FIRSTS) delete FIRSTS[k];
+  Object.assign(FIRSTS, d.firsts || {});
+  FIRST_N = d.firstN || Object.keys(FIRSTS).length;
   // relics are the one thing that outlives a season, so they load from their own key
   ETERNAL.p = (d.eternal && d.eternal.p) || []; ETERNAL.ai = (d.eternal && d.eternal.ai) || [];
   Object.assign(SET, d.set || {});
@@ -107,6 +111,7 @@ function applySave(d) {
   p.playtime = s.playtime || 0; p.stats = Object.assign(p.stats, s.stats || {});
   p.autoOn = !!s.autoOn; p.autoMode = s.autoMode || 'all';
   p.skin = s.skin || 0; p.hair = s.hair || 0; p.seenZones = s.seenZones || {}; p.mythic = s.mythic || 0;
+  p.title = s.title || '';   // a first-blood title you earned is worn until the season wipes
   p.x = s.x != null ? s.x : p.x; p.z = s.z != null ? s.z : p.z; p.y = groundH(p.x, p.z);
   p.st = calcStats(p); p.resMax = resourceMax(p); p.hp = p.st.hpMax;
   p.res = CLASS_BY[p.cls].res === 'rage' ? 0 : p.resMax;

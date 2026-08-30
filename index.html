@@ -1728,6 +1728,30 @@ function buildContent() {
   buildZones(); buildQuests(); buildBosses(); buildRaids();
 }
 
+/* ------------------------------ FIRST BLOOD ------------------------------
+   One hundred world bosses. One hundred firsts. Each claimable exactly once, by
+   exactly one of the thousand, and never again for the rest of the season.
+
+   The season's only other scarcity -- the three Ascendant seats -- resolves in the
+   last ten minutes. This is the same shape (a ledger of holders, an ordinal, a
+   chat line, a title you wear) spread across the whole four and a half hours, so
+   that the middle of a season has something in it that can be taken from you.
+
+   It paces itself with no tuning: bosses are built in nine escalating tiers
+   (lv = zone.lvMin + 4 + tier*3), and advanceRec already sends adventurers to
+   lairs by level fit -- so tier 0 falls in the opening minutes while the tier-8
+   lairs out in the high zones are often still unclaimed when the crowns are read. */
+const FB = {
+  RATE: 0.0040,     // base per-second chance a qualified hunter finishes their boss
+  SKILL: 0.28,      // how much skill matters. deliberately mild: the race should be
+                    //   about who gets to the level first, not who was born best
+  OVER: 12,         // levels above the boss at which a clear is comfortable
+  OVERMAX: 1.6,
+  TIER: 1.15,       // each escalating tier is this much slower to bring down, so the
+                    //   deep lairs stay contested instead of the board emptying at the
+                    //   wire and the mechanic going dead in the season's tensest hour
+};
+
 /* ------------------------------ THE OVERLORD ------------------------------
    The grand finale. When the season's crowns are handed out, every adventurer in
    the world -- all 1000 of them, and you -- takes the field against one thing.
@@ -4482,7 +4506,7 @@ function makePlayer(name, clsId) {
     quests: [], done: {}, doneCount: 0, kills: 0, deaths: 0, bossKills: 0, raidKills: 0,
     guild: null, respect: 0, playtime: 0, mythic: 0,
     stats: { dmgDone: 0, dmgTaken: 0, healed: 0, goldEarned: 0, itemsFound: 0, questsDone: 0, bossesKilled: 0, raidsDone: 0, pvpWins: 0, distance: 0 },
-    autoOn: false, autoMode: 'all', dead: 0, sprint: 1, swim: 0, fill: 0.07,
+    autoOn: false, autoMode: 'all', dead: 0, sprint: 1, swim: 0, fill: 0.07, title: '',
     lastTownVisit: 0, seenZones: {}, af: {},
   };
   const hub = POI.hubs[0];
@@ -4915,6 +4939,7 @@ function onMobKilled(m, p) {
     for (const it of loot) giveItem(p, it);
     metaBossKilled(p, bd);
     questProgress(p, 'boss', m.name, 1);
+    claimFirst(m.bossId, null);          // first blood, if nobody in the world got here first
     BOSS_STATE[m.bossId] = G.t + (bd ? bd.respawn : 120);
   } else {
     if (Math.random() < (m.rank === 1 ? .85 : .34) + (p.af.lucky || 0) * .004) {
@@ -5647,6 +5672,11 @@ const SEASON = { num: 1, start: 0, ended: false, champions: [], milestone: 0, as
 let META_NOW = 0;
 function metaNow() { return META_NOW || Date.now(); }
 const MYTHIC_HOLDERS = new Set();
+/* FIRST BLOOD: boss id -> who took it first. One hundred slots, one season, no retakes.
+   The board never quite empties: the tier-8 lairs out in the high zones are usually
+   still unclaimed when the crowns are read. */
+const FIRSTS = {};
+let FIRST_N = 0;
 let metaAcc = 0, warT = 180, tradeT = 40, worldEventT = 300;
 
 /* ------------------------------ ROSTER ------------------------------ */
@@ -5761,7 +5791,11 @@ function advanceRec(rec, dt, fast) {
       const sc = fit + _mrng.f() * .35;
       if (sc > bs) { bs = sc; best = p; }
     }
-    if (best) { rec.tx = best.x + _mrng.r(-18, 18); rec.tz = best.z + _mrng.r(-18, 18); rec.z2 = best.zone; }
+    if (best) {
+      rec.tx = best.x + _mrng.r(-18, 18); rec.tz = best.z + _mrng.r(-18, 18); rec.z2 = best.zone;
+      // the lair already carries its boss id; it used to be picked and thrown away
+      rec.tgtBoss = (s.k === 'boss' && best.boss != null) ? best.boss : null;
+    }
   }
   const S = AI_STATE_BY[rec.st] || AI_STATES[0];
   const eff = rec.skill * (0.72 + Math.min(1.0, rec.gs / Math.max(1, refPrimary(rec.lv) * 5.2)) * 0.55) * S.xp;
@@ -5772,7 +5806,24 @@ function advanceRec(rec, dt, fast) {
   rec.gold += (2.4 + rec.lv * 1.15) * S.gold * dt * 0.32;
   rec.kills += S.xp * dt * 0.42;
   if (S.k === 'quest') rec.quests += dt * 0.055;
-  if (S.k === 'boss') rec.bosses += dt * 0.010;
+  if (S.k === 'boss') {
+    rec.bosses += dt * 0.010;
+    /* FIRST BLOOD. Only hunters who have actually out-levelled their boss can take it,
+       so the race is decided by who gets there first -- not by who was born with the
+       best skill roll. Skill is weighted deliberately mildly (FB.SKILL) or the forty
+       elite records at indices 0-39 take most of the hundred. Exponential form so a
+       600-second offline step and a 0.5-second live step give the same expected pace. */
+    if (rec.tgtBoss != null && !FIRSTS[rec.tgtBoss]) {
+      const bd = DB.bosses[rec.tgtBoss];
+      if (bd && rec.lv >= bd.lv) {
+        const over = Math.min(FB.OVERMAX, (rec.lv - bd.lv) / FB.OVER);
+        const tier = Math.floor(rec.tgtBoss / 12);
+        const rate = FB.RATE * (1 - FB.SKILL + rec.skill * FB.SKILL) * (0.5 + over)
+          / (1 + tier * FB.TIER);
+        if (_mrng.f() < 1 - Math.exp(-rate * dt)) claimFirst(rec.tgtBoss, rec, fast);
+      }
+    }
+  }
   if (S.k === 'raid') rec.raids += dt * 0.0042;
   if (S.k === 'pvp' && _mrng.chance(dt * 0.02)) rec.pvp++;
   rec.respect += dt * 0.06 * (1 + rec.lv / 90) * S.xp;
@@ -5821,6 +5872,49 @@ function advanceRec(rec, dt, fast) {
       rec.x += dx / d * step; rec.z += dz / d * step;
     }
   }
+}
+/** Claim a world boss's first kill. `who` is a roster record, or null for the player. */
+function claimFirst(bid, who, quiet) {
+  if (bid == null || bid < 0 || FIRSTS[bid]) return false;
+  const bd = DB.bosses[bid]; if (!bd) return false;
+  const isPlayer = !who;
+  const nm = isPlayer ? G.player.name : who.n;
+  FIRST_N++;
+  FIRSTS[bid] = { n: nm, i: isPlayer ? -1 : who.i, lv: isPlayer ? G.player.level : who.lv,
+    at: metaNow(), place: FIRST_N, g: isPlayer ? (G.player.guild == null ? -1 : G.player.guild) : who.g };
+  const title = 'First to ' + bd.n;
+  if (isPlayer) {
+    G.player.title = title;
+    if (!quiet) {
+      banner('FIRST BLOOD', bd.n + ', ' + bd.t);
+      chatPush('kill', '\u2726 YOU are first to ' + bd.n + ' \u2014 ' + FIRST_N + ' of ' + DB.bosses.length + ' claimed');
+      toast('<b style="color:#ffd766">FIRST BLOOD</b><div class="tiny">' + esc(bd.n) + ' \u00b7 nobody had killed it</div>', 'big');
+      sfx('levelup', 1); R.flash = .6; R.flashCol = [1, .85, .5];
+    }
+  } else {
+    who.title = title;
+    if (!quiet) chatPush('kill', '\u2726 ' + nm + ' is first to ' + bd.n +
+      (who.g >= 0 && GUILDS[who.g] ? ' ' + GUILDS[who.g].n : '') +
+      ' \u2014 ' + FIRST_N + ' of ' + DB.bosses.length + ' claimed');
+  }
+  uiDirty.all = 1;
+  return true;
+}
+/** How many firsts stand to one name. Used for the Trailblazer crown. */
+function firstsBy(name) {
+  let n = 0;
+  for (const k in FIRSTS) if (FIRSTS[k].n === name) n++;
+  return n;
+}
+function firstsLeaders() {
+  const by = {};
+  for (const k in FIRSTS) {
+    const f = FIRSTS[k];
+    if (!by[f.n]) by[f.n] = { n: f.n, c: 0, isPlayer: f.i === -1, g: f.g, first: f.place };
+    by[f.n].c++;
+    if (f.place < by[f.n].first) by[f.n].first = f.place;
+  }
+  return Object.keys(by).map(k => by[k]).sort((a, b) => (b.c - a.c) || (a.first - b.first));
 }
 function mythicAvailable(who) {
   if (MYTHIC_HOLDERS.size < MYTHIC_LIMIT) return true;
@@ -6528,7 +6622,7 @@ function playerAsRecord() {
     gt, gi, g: p.guild == null ? -1 : p.guild, st: p.autoOn ? 'quest' : 'town',
     respect: p.respect, kills: p.kills, quests: p.doneCount, bosses: p.bossKills,
     raids: p.stats.raidsDone, deaths: p.deaths, pvp: 0, best: bestTierOf(p.gear),
-    title: '', isPlayer: true, x: p.x, z: p.z,
+    title: p.title || '', isPlayer: true, x: p.x, z: p.z,
   };
 }
 /* Level first, then gear, then the rest — "highest level, best gear, best
@@ -6924,6 +7018,9 @@ function endSeason(quiet) {
   });
   // top guild is crowned purely on respect, as its own title
   const byRespect = GUILDS.slice().sort((a, b) => b.respect - a.respect)[0];
+  // and the Trailblazer: most world-boss firsts taken across the whole season
+  const blazers = firstsLeaders();
+  const blazer = blazers[0] || null;
   const rec = {
     num: SEASON.num, ended: Date.now(),
     champ: capsule(byLevel),
@@ -6932,6 +7029,10 @@ function endSeason(quiet) {
     guild: byRespect ? { n: byRespect.n, respect: Math.round(byRespect.respect),
       members: byRespect.members.length, wins: byRespect.wins, isPlayerGuild: !!byRespect.playerGuild } : null,
     ascended: SEASON.ascended.slice(),
+    blazer: blazer ? { n: blazer.n, c: blazer.c, isPlayer: !!blazer.isPlayer,
+      guild: blazer.g >= 0 && GUILDS[blazer.g] ? GUILDS[blazer.g].n : '' } : null,
+    firstsTaken: FIRST_N, firstsTotal: DB.bosses.length,
+    playerFirsts: G.player ? firstsBy(G.player.name) : 0,
     top: all.slice(0, 10).map(r => ({ n: r.n, lv: r.lv, gs: r.gs, isPlayer: !!r.isPlayer })),
     playerRank: all.findIndex(r => r.isPlayer) + 1,
     playerGearRank: all.slice().sort((a, b) => b.gs - a.gs).findIndex(r => r.isPlayer) + 1,
@@ -6964,6 +7065,8 @@ function startNewSeason() {
   ovCarryApplyRoster();
   for (const k in RAID_LOCK) delete RAID_LOCK[k];
   for (const k in BOSS_STATE) delete BOSS_STATE[k];
+  for (const k in FIRSTS) delete FIRSTS[k];
+  FIRST_N = 0;
   TRADE_BOARD.length = 0; WAR_LOG.length = 0;
   /* open whispers and queued replies reference pre-wipe roster indices; left alive
      they re-point at whoever the rebuilt roster puts at that index */
@@ -7176,7 +7279,8 @@ function updateHUD(dt) {
   if (hudT > 0) { updateActionBar(); return; }
   hudT = 0.2;
   $('pName').textContent = p.name;
-  $('pGuild').textContent = p.guild != null && GUILDS[p.guild] ? GUILDS[p.guild].n : '<no clan>';
+  $('pGuild').innerHTML = (p.guild != null && GUILDS[p.guild] ? esc(GUILDS[p.guild].n) : '&lt;no clan&gt;') +
+    (p.title ? ' <b style="color:#ffd766">· ' + esc(p.title) + '</b>' : '');
   $('gold').innerHTML = fmt(p.gold) + ' <span style="opacity:.7">g</span>';
   $('sNum').textContent = SEASON.num;
   const fin = seasonFinalCall();
@@ -7326,6 +7430,14 @@ function drawOverlay() {
       g.font = '' + (9 * scale) + 'px Trebuchet MS,sans-serif';
       g.fillStyle = '#9aa3b4';
       g.fillText('‹' + rec.lv + '› ' + (gname || CLASS_BY[rec.c].n), sx, sy + 11 * scale);
+      // a first-blood title is worn in gold, and is the reason rec.title exists at all
+      if (rec.title) {
+        g.font = '700 ' + (8.5 * scale) + 'px Trebuchet MS,sans-serif';
+        g.fillStyle = '#000'; g.globalAlpha = alpha * .5;
+        g.fillText(rec.title, sx + 1, sy + 21 * scale + 1);
+        g.globalAlpha = alpha; g.fillStyle = '#ffd766';
+        g.fillText(rec.title, sx, sy + 21 * scale);
+      }
     } else {
       const w = (e.kind === 'boss' ? 72 : 46) * scale, h = 4.6 * scale;
       const frac = clamp(e.hp / e.hpMax, 0, 1);
@@ -7474,7 +7586,9 @@ function drawMinimap(dt) {
     const m = w2m(poi.x, poi.z);
     g.font = '11px sans-serif'; g.textAlign = 'center';
     const ic = poi.k === 'hub' ? '🏰' : poi.k === 'raid' ? '🐉' : poi.k === 'lair' ? '☠' : poi.k === 'ruin' ? '🗿' : '';
-    if (ic) g.fillText(ic, m[0], m[1] + 4);
+    // a lair whose first blood is already taken is spent: it greys out and stays that way
+    const spent = poi.k === 'lair' && poi.boss != null && FIRSTS[poi.boss];
+    if (ic) { g.globalAlpha = spent ? .3 : 1; g.fillText(ic, m[0], m[1] + 4); g.globalAlpha = 1; }
     else { g.fillStyle = 'rgba(220,120,60,.8)'; g.fillRect(m[0] - 1.5, m[1] - 1.5, 3, 3); }
   }
   // AI adventurers (roster, not just avatars — the world feels populated)
@@ -7679,7 +7793,7 @@ const PANEL_DEF = {
   map: { t: 'World Map', tabs: ['Map', 'Zones'] },
   guild: { t: 'Clan', tabs: ['My Clan', 'Clans', 'Wars'] },
   raid: { t: 'Raids & Bosses', tabs: ['Raids', 'World Bosses'] },
-  hof: { t: 'Hall of Fame', tabs: ['Top 100', 'Top 20 Clans', 'Ascendants', 'Past Seasons'] },
+  hof: { t: 'Hall of Fame', tabs: ['Top 100', 'Top 20 Clans', 'Ascendants', 'First Blood', 'Past Seasons'] },
   social: { t: 'Adventurers', tabs: ['Online', 'Whispers', 'Chat'] },
   opts: { t: 'Settings', tabs: ['Game', 'Graphics', 'Audio', 'About'] },
 };
@@ -8114,6 +8228,43 @@ const PANEL_RENDER = {
       }
       return h;
     }
+    if (tab === 3) {
+      const total = DB.bosses.length, taken = FIRST_N, left = total - taken;
+      let h = '<div class="card center" style="border-color:#ffd766"><b style="color:#ffd766;font-size:16px">FIRST BLOOD</b>' +
+        '<div class="tiny" style="margin-top:4px">One hundred world bosses. The <b>first</b> adventurer in the world to bring each one down takes its name, and wears it for the rest of the season. Each is claimable exactly once.</div>' +
+        '<div class="grid g3" style="margin-top:8px">' +
+        '<div class="card center"><b style="color:#ffd766">' + taken + '</b><div class="tiny">claimed</div></div>' +
+        '<div class="card center"><b>' + left + '</b><div class="tiny">still standing</div></div>' +
+        '<div class="card center"><b class="' + (firstsBy(G.player.name) ? 'q4' : '') + '">' + firstsBy(G.player.name) +
+        '</b><div class="tiny">yours</div></div></div></div>';
+      const lead = firstsLeaders();
+      if (lead.length) {
+        h += '<h4 class="sec">Trailblazers</h4>';
+        lead.slice(0, 10).forEach((l, i) => {
+          h += '<div class="row' + (l.isPlayer ? ' me' : '') + '"><span class="k">' + (i + 1) + '. ' + esc(l.n) +
+            (l.isPlayer ? ' (you)' : '') + (l.g >= 0 && GUILDS[l.g] ? ' <span class="tiny">' + esc(GUILDS[l.g].n) + '</span>' : '') +
+            '</span><b style="color:#ffd766">' + l.c + '</b></div>';
+        });
+      }
+      h += '<h4 class="sec">The Board</h4><table class="lb"><tr><th>#</th><th>World Boss</th><th>Lv</th><th>Zone</th><th>First Blood</th></tr>';
+      // unclaimed first: those are the ones still worth walking to
+      const ids = DB.bosses.map(b => b.id).sort((a, b) => {
+        const fa = FIRSTS[a] ? 1 : 0, fb = FIRSTS[b] ? 1 : 0;
+        if (fa !== fb) return fa - fb;
+        if (fa) return FIRSTS[a].place - FIRSTS[b].place;
+        return DB.bosses[a].lv - DB.bosses[b].lv;
+      });
+      for (const id of ids) {
+        const b = DB.bosses[id], f = FIRSTS[id];
+        h += '<tr class="' + (f && f.i === -1 ? 'me' : '') + '"><td class="tiny">' + (f ? f.place : '—') + '</td>' +
+          '<td><b style="color:' + (f ? '#8f98a9' : '#ffd766') + '">' + esc(b.n) + '</b><div class="tiny">' + esc(b.t) + '</div></td>' +
+          '<td>' + b.lv + '</td><td class="tiny">' + esc(DB.zones[b.z].n) + '</td>' +
+          '<td>' + (f ? '<b style="color:' + (f.i === -1 ? '#4ad24a' : '#c9bda0') + '">' + esc(f.n) + '</b><div class="tiny">at level ' + f.lv + '</div>'
+            : '<b style="color:#ffd766">UNCLAIMED</b>') + '</td></tr>';
+      }
+      h += '</table>';
+      return h;
+    }
     let h = '<div class="tiny">Every season ever played, kept forever — newest first.</div>';
     if (!SEASON.champions.length) return h + '<div class="tiny center" style="padding:26px">No season has ended yet.<br>Season ' +
       SEASON.num + ' ends in <b style="color:var(--gold)">' + dur(seasonLeft()) + '</b>.</div>';
@@ -8154,6 +8305,8 @@ const PANEL_RENDER = {
       h += '<div class="row"><span class="k">Crowned Clan</span><b>' + esc(c.guild ? c.guild.n : '—') +
         (c.guild && c.guild.isPlayerGuild ? ' (yours)' : '') + (c.guild ? ' · ' + fmt(c.guild.respect) + ' respect' : '') + '</b></div>';
       // seasons archived before the Overlord existed have no c.ov, so guard it
+      if (c.blazer) h += '<div class="row"><span class="k">Trailblazer</span><b style="color:#ffd766">' +
+        esc(c.blazer.n) + (c.blazer.isPlayer ? ' (you)' : '') + ' · ' + c.blazer.c + ' firsts</b></div>';
       if (c.ov) h += '<div class="row"><span class="k">The Overlord</span><b style="color:' +
         (c.ov.outcome === 2 ? '#7ff2ff' : c.ov.outcome === 1 ? '#d0a0ff' : '#ff5a72') + '">' +
         (c.ov.outcome === 2 ? 'HELD \u00b7 ' + c.ov.alive + ' stood'
@@ -8528,6 +8681,18 @@ function showSeasonEnd(rec) {
     h += crown('CHAMPION OF GEAR', rec.gearChamp, 'Greatest gear power in the world');
   }
 
+  if (rec.blazer) {
+    h += '<div class="champ" style="border-color:#ffd766;box-shadow:0 0 40px rgba(255,215,102,.2)">' +
+      '<div class="tiny" style="letter-spacing:.3em;color:#ffd766">THE TRAILBLAZER — MOST FIRST BLOODS</div>' +
+      '<div class="cn">' + esc(rec.blazer.n) + (rec.blazer.isPlayer ? ' <span style="font-size:.5em;color:#4ad24a">(YOU)</span>' : '') + '</div>' +
+      '<div class="tiny" style="color:#c9bda0;margin-top:4px">' + rec.blazer.c + ' world bosses killed before anyone else' +
+      (rec.blazer.guild ? ' · ' + esc(rec.blazer.guild) : '') + '</div>' +
+      '<div class="tiny" style="color:#8f98a9;margin-top:5px">' + (rec.firstsTaken || 0) + ' of ' + (rec.firstsTotal || 100) +
+      ' claimed this season' + ((rec.firstsTotal || 100) - (rec.firstsTaken || 0) > 0
+        ? ' — ' + ((rec.firstsTotal || 100) - (rec.firstsTaken || 0)) + ' were never brought down' : '') +
+      (rec.playerFirsts ? ' · you took ' + rec.playerFirsts : '') + '</div></div>';
+  }
+
   if (rec.guild) {
     h += '<div class="champ" style="border-color:#4aa3f0;box-shadow:0 0 40px rgba(74,163,240,.2)">' +
       '<div class="tiny" style="letter-spacing:.3em;color:#8fc6ff">CROWNED CLAN \u2014 HIGHEST RESPECT</div>' +
@@ -8799,10 +8964,21 @@ const AUTO = {
       const cands = DB.bosses.filter(b => b.lv <= p.level + 2 && b.lv >= p.level - 26
         && (BOSS_STATE[b.id] || 0) <= G.t && !this.isBlocked('boss:' + b.id));
       if (cands.length && (mode === 'boss' || Math.random() < 0.26)) {
-        cands.sort((a, b) => V.dist2(p.x, p.z, a.x, a.z2) - V.dist2(p.x, p.z, b.x, b.z2));
-        const b = cands[(Math.random() * Math.min(3, cands.length)) | 0];
+        /* First Blood: a lair nobody in the world has cleared is worth walking past two
+           that are already spoken for. Distance still decides between equals, so the agent
+           does not march across the continent for a claim it will lose on the way. */
+        cands.sort((a, b) => {
+          const fa = FIRSTS[a.id] ? 1 : 0, fb = FIRSTS[b.id] ? 1 : 0;
+          if (fa !== fb) return fa - fb;
+          return V.dist2(p.x, p.z, a.x, a.z2) - V.dist2(p.x, p.z, b.x, b.z2);
+        });
+        const unclaimed = cands.filter(b => !FIRSTS[b.id]);
+        const pool = unclaimed.length ? unclaimed : cands;
+        const b = pool[(Math.random() * Math.min(3, pool.length)) | 0];
         this.setGoal(b.x, b.z2, 'boss', b.n + ', ' + b.t, 'boss:' + b.id);
-        this.act = 'boss'; this.actLabel = 'Hunting a world boss'; this.committed = 1; return;
+        this.act = 'boss';
+        this.actLabel = FIRSTS[b.id] ? 'Hunting a world boss' : 'Racing for first blood';
+        this.committed = 1; return;
       }
     }
     // 3) the nearest unfinished quest objective
@@ -9012,13 +9188,14 @@ function saveGame() {
       season: { num: SEASON.num, start: SEASON.start, ended: SEASON.ended, champions: SEASON.champions,
         milestone: SEASON.milestone, ascended: SEASON.ascended, ov: SEASON.ov },
       mythic: Array.from(MYTHIC_HOLDERS),
+      firsts: FIRSTS, firstN: FIRST_N,
       eternal: ETERNAL,
       set: SET,
       p: {
         n: p.name, c: p.cls, lv: p.level, xp: p.xp, gold: p.gold,
         gear: p.gear, bags: p.bags, quests: p.quests, done: p.done, doneCount: p.doneCount,
         kills: p.kills, deaths: p.deaths, bossKills: p.bossKills, raidKills: p.raidKills,
-        guild: p.guild, respect: p.respect, playtime: p.playtime, stats: p.stats,
+        guild: p.guild, respect: p.respect, playtime: p.playtime, stats: p.stats, title: p.title || '',
         autoOn: p.autoOn, autoMode: p.autoMode, x: p.x, z: p.z,
         skin: p.skin, hair: p.hair, seenZones: p.seenZones, mythic: p.mythic,
       },
@@ -9042,6 +9219,9 @@ function applySave(d) {
   SEASON.milestone = d.season.milestone || 0; SEASON.ascended = d.season.ascended || [];
   SEASON.ov = d.season.ov || null;
   MYTHIC_HOLDERS.clear(); (d.mythic || []).forEach(x => MYTHIC_HOLDERS.add(x));
+  for (const k in FIRSTS) delete FIRSTS[k];
+  Object.assign(FIRSTS, d.firsts || {});
+  FIRST_N = d.firstN || Object.keys(FIRSTS).length;
   // relics are the one thing that outlives a season, so they load from their own key
   ETERNAL.p = (d.eternal && d.eternal.p) || []; ETERNAL.ai = (d.eternal && d.eternal.ai) || [];
   Object.assign(SET, d.set || {});
@@ -9063,6 +9243,7 @@ function applySave(d) {
   p.playtime = s.playtime || 0; p.stats = Object.assign(p.stats, s.stats || {});
   p.autoOn = !!s.autoOn; p.autoMode = s.autoMode || 'all';
   p.skin = s.skin || 0; p.hair = s.hair || 0; p.seenZones = s.seenZones || {}; p.mythic = s.mythic || 0;
+  p.title = s.title || '';   // a first-blood title you earned is worn until the season wipes
   p.x = s.x != null ? s.x : p.x; p.z = s.z != null ? s.z : p.z; p.y = groundH(p.x, p.z);
   p.st = calcStats(p); p.resMax = resourceMax(p); p.hp = p.st.hpMax;
   p.res = CLASS_BY[p.cls].res === 'rage' ? 0 : p.resMax;

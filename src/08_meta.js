@@ -18,6 +18,11 @@ const SEASON = { num: 1, start: 0, ended: false, champions: [], milestone: 0, as
 let META_NOW = 0;
 function metaNow() { return META_NOW || Date.now(); }
 const MYTHIC_HOLDERS = new Set();
+/* FIRST BLOOD: boss id -> who took it first. One hundred slots, one season, no retakes.
+   The board never quite empties: the tier-8 lairs out in the high zones are usually
+   still unclaimed when the crowns are read. */
+const FIRSTS = {};
+let FIRST_N = 0;
 let metaAcc = 0, warT = 180, tradeT = 40, worldEventT = 300;
 
 /* ------------------------------ ROSTER ------------------------------ */
@@ -132,7 +137,11 @@ function advanceRec(rec, dt, fast) {
       const sc = fit + _mrng.f() * .35;
       if (sc > bs) { bs = sc; best = p; }
     }
-    if (best) { rec.tx = best.x + _mrng.r(-18, 18); rec.tz = best.z + _mrng.r(-18, 18); rec.z2 = best.zone; }
+    if (best) {
+      rec.tx = best.x + _mrng.r(-18, 18); rec.tz = best.z + _mrng.r(-18, 18); rec.z2 = best.zone;
+      // the lair already carries its boss id; it used to be picked and thrown away
+      rec.tgtBoss = (s.k === 'boss' && best.boss != null) ? best.boss : null;
+    }
   }
   const S = AI_STATE_BY[rec.st] || AI_STATES[0];
   const eff = rec.skill * (0.72 + Math.min(1.0, rec.gs / Math.max(1, refPrimary(rec.lv) * 5.2)) * 0.55) * S.xp;
@@ -143,7 +152,24 @@ function advanceRec(rec, dt, fast) {
   rec.gold += (2.4 + rec.lv * 1.15) * S.gold * dt * 0.32;
   rec.kills += S.xp * dt * 0.42;
   if (S.k === 'quest') rec.quests += dt * 0.055;
-  if (S.k === 'boss') rec.bosses += dt * 0.010;
+  if (S.k === 'boss') {
+    rec.bosses += dt * 0.010;
+    /* FIRST BLOOD. Only hunters who have actually out-levelled their boss can take it,
+       so the race is decided by who gets there first -- not by who was born with the
+       best skill roll. Skill is weighted deliberately mildly (FB.SKILL) or the forty
+       elite records at indices 0-39 take most of the hundred. Exponential form so a
+       600-second offline step and a 0.5-second live step give the same expected pace. */
+    if (rec.tgtBoss != null && !FIRSTS[rec.tgtBoss]) {
+      const bd = DB.bosses[rec.tgtBoss];
+      if (bd && rec.lv >= bd.lv) {
+        const over = Math.min(FB.OVERMAX, (rec.lv - bd.lv) / FB.OVER);
+        const tier = Math.floor(rec.tgtBoss / 12);
+        const rate = FB.RATE * (1 - FB.SKILL + rec.skill * FB.SKILL) * (0.5 + over)
+          / (1 + tier * FB.TIER);
+        if (_mrng.f() < 1 - Math.exp(-rate * dt)) claimFirst(rec.tgtBoss, rec, fast);
+      }
+    }
+  }
   if (S.k === 'raid') rec.raids += dt * 0.0042;
   if (S.k === 'pvp' && _mrng.chance(dt * 0.02)) rec.pvp++;
   rec.respect += dt * 0.06 * (1 + rec.lv / 90) * S.xp;
@@ -192,6 +218,49 @@ function advanceRec(rec, dt, fast) {
       rec.x += dx / d * step; rec.z += dz / d * step;
     }
   }
+}
+/** Claim a world boss's first kill. `who` is a roster record, or null for the player. */
+function claimFirst(bid, who, quiet) {
+  if (bid == null || bid < 0 || FIRSTS[bid]) return false;
+  const bd = DB.bosses[bid]; if (!bd) return false;
+  const isPlayer = !who;
+  const nm = isPlayer ? G.player.name : who.n;
+  FIRST_N++;
+  FIRSTS[bid] = { n: nm, i: isPlayer ? -1 : who.i, lv: isPlayer ? G.player.level : who.lv,
+    at: metaNow(), place: FIRST_N, g: isPlayer ? (G.player.guild == null ? -1 : G.player.guild) : who.g };
+  const title = 'First to ' + bd.n;
+  if (isPlayer) {
+    G.player.title = title;
+    if (!quiet) {
+      banner('FIRST BLOOD', bd.n + ', ' + bd.t);
+      chatPush('kill', '\u2726 YOU are first to ' + bd.n + ' \u2014 ' + FIRST_N + ' of ' + DB.bosses.length + ' claimed');
+      toast('<b style="color:#ffd766">FIRST BLOOD</b><div class="tiny">' + esc(bd.n) + ' \u00b7 nobody had killed it</div>', 'big');
+      sfx('levelup', 1); R.flash = .6; R.flashCol = [1, .85, .5];
+    }
+  } else {
+    who.title = title;
+    if (!quiet) chatPush('kill', '\u2726 ' + nm + ' is first to ' + bd.n +
+      (who.g >= 0 && GUILDS[who.g] ? ' ' + GUILDS[who.g].n : '') +
+      ' \u2014 ' + FIRST_N + ' of ' + DB.bosses.length + ' claimed');
+  }
+  uiDirty.all = 1;
+  return true;
+}
+/** How many firsts stand to one name. Used for the Trailblazer crown. */
+function firstsBy(name) {
+  let n = 0;
+  for (const k in FIRSTS) if (FIRSTS[k].n === name) n++;
+  return n;
+}
+function firstsLeaders() {
+  const by = {};
+  for (const k in FIRSTS) {
+    const f = FIRSTS[k];
+    if (!by[f.n]) by[f.n] = { n: f.n, c: 0, isPlayer: f.i === -1, g: f.g, first: f.place };
+    by[f.n].c++;
+    if (f.place < by[f.n].first) by[f.n].first = f.place;
+  }
+  return Object.keys(by).map(k => by[k]).sort((a, b) => (b.c - a.c) || (a.first - b.first));
 }
 function mythicAvailable(who) {
   if (MYTHIC_HOLDERS.size < MYTHIC_LIMIT) return true;
@@ -899,7 +968,7 @@ function playerAsRecord() {
     gt, gi, g: p.guild == null ? -1 : p.guild, st: p.autoOn ? 'quest' : 'town',
     respect: p.respect, kills: p.kills, quests: p.doneCount, bosses: p.bossKills,
     raids: p.stats.raidsDone, deaths: p.deaths, pvp: 0, best: bestTierOf(p.gear),
-    title: '', isPlayer: true, x: p.x, z: p.z,
+    title: p.title || '', isPlayer: true, x: p.x, z: p.z,
   };
 }
 /* Level first, then gear, then the rest — "highest level, best gear, best
@@ -1295,6 +1364,9 @@ function endSeason(quiet) {
   });
   // top guild is crowned purely on respect, as its own title
   const byRespect = GUILDS.slice().sort((a, b) => b.respect - a.respect)[0];
+  // and the Trailblazer: most world-boss firsts taken across the whole season
+  const blazers = firstsLeaders();
+  const blazer = blazers[0] || null;
   const rec = {
     num: SEASON.num, ended: Date.now(),
     champ: capsule(byLevel),
@@ -1303,6 +1375,10 @@ function endSeason(quiet) {
     guild: byRespect ? { n: byRespect.n, respect: Math.round(byRespect.respect),
       members: byRespect.members.length, wins: byRespect.wins, isPlayerGuild: !!byRespect.playerGuild } : null,
     ascended: SEASON.ascended.slice(),
+    blazer: blazer ? { n: blazer.n, c: blazer.c, isPlayer: !!blazer.isPlayer,
+      guild: blazer.g >= 0 && GUILDS[blazer.g] ? GUILDS[blazer.g].n : '' } : null,
+    firstsTaken: FIRST_N, firstsTotal: DB.bosses.length,
+    playerFirsts: G.player ? firstsBy(G.player.name) : 0,
     top: all.slice(0, 10).map(r => ({ n: r.n, lv: r.lv, gs: r.gs, isPlayer: !!r.isPlayer })),
     playerRank: all.findIndex(r => r.isPlayer) + 1,
     playerGearRank: all.slice().sort((a, b) => b.gs - a.gs).findIndex(r => r.isPlayer) + 1,
@@ -1335,6 +1411,8 @@ function startNewSeason() {
   ovCarryApplyRoster();
   for (const k in RAID_LOCK) delete RAID_LOCK[k];
   for (const k in BOSS_STATE) delete BOSS_STATE[k];
+  for (const k in FIRSTS) delete FIRSTS[k];
+  FIRST_N = 0;
   TRADE_BOARD.length = 0; WAR_LOG.length = 0;
   /* open whispers and queued replies reference pre-wipe roster indices; left alive
      they re-point at whoever the rebuilt roster puts at that index */

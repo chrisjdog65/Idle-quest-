@@ -236,10 +236,21 @@ const AUTO = {
       const cands = DB.bosses.filter(b => b.lv <= p.level + 2 && b.lv >= p.level - 26
         && (BOSS_STATE[b.id] || 0) <= G.t && !this.isBlocked('boss:' + b.id));
       if (cands.length && (mode === 'boss' || Math.random() < 0.26)) {
-        cands.sort((a, b) => V.dist2(p.x, p.z, a.x, a.z2) - V.dist2(p.x, p.z, b.x, b.z2));
-        const b = cands[(Math.random() * Math.min(3, cands.length)) | 0];
+        /* First Blood: a lair nobody in the world has cleared is worth walking past two
+           that are already spoken for. Distance still decides between equals, so the agent
+           does not march across the continent for a claim it will lose on the way. */
+        cands.sort((a, b) => {
+          const fa = FIRSTS[a.id] ? 1 : 0, fb = FIRSTS[b.id] ? 1 : 0;
+          if (fa !== fb) return fa - fb;
+          return V.dist2(p.x, p.z, a.x, a.z2) - V.dist2(p.x, p.z, b.x, b.z2);
+        });
+        const unclaimed = cands.filter(b => !FIRSTS[b.id]);
+        const pool = unclaimed.length ? unclaimed : cands;
+        const b = pool[(Math.random() * Math.min(3, pool.length)) | 0];
         this.setGoal(b.x, b.z2, 'boss', b.n + ', ' + b.t, 'boss:' + b.id);
-        this.act = 'boss'; this.actLabel = 'Hunting a world boss'; this.committed = 1; return;
+        this.act = 'boss';
+        this.actLabel = FIRSTS[b.id] ? 'Hunting a world boss' : 'Racing for first blood';
+        this.committed = 1; return;
       }
     }
     // 3) the nearest unfinished quest objective
