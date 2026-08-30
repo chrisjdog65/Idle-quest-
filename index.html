@@ -6824,7 +6824,12 @@ function achLeaders(limit) {
 /** This season's crown: most achievements EARNED since the wipe, not held. */
 function achSeasonLeaders(limit) {
   const rows = achLeaders(0).slice();
-  rows.sort((a, b) => (b.achS - a.achS) || (b.achN - a.achN) || a.n.localeCompare(b.n));
+  /* The crown is a photo finish -- measured margins over the runner-up run +0 to
+     +3, so the tiebreak decides it about two seasons in five. Break it toward the
+     SMALLER board: earning the same number from further back is the harder thing,
+     and breaking it the other way handed the crown to whoever already had the
+     biggest board, which is the exact coasting this crown exists to prevent. */
+  rows.sort((a, b) => (b.achS - a.achS) || (a.achN - b.achN) || a.n.localeCompare(b.n));
   return limit ? rows.slice(0, limit) : rows;
 }
 function achPlayerRank() {
