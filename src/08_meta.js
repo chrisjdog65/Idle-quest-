@@ -271,7 +271,7 @@ function mythicAvailable(who) {
 }
 /** Dress a roster record in a full Mythic set at their current level. */
 function grantMythicSetRec(rec) {
-  const ilvl = Math.round(rec.lv * 2.45 + 40);
+  const ilvl = mythicIlvl(rec.lv, SEASON.num);
   for (let i = 0; i < 15; i++) { rec.gt[i] = 6; rec.gi[i] = ilvl; }
   rec.gs = recGearScore(rec);
   rec.best = 5;
@@ -280,7 +280,7 @@ function grantMythicSetRec(rec) {
 function grantMythicSetPlayer() {
   const p = G.player;
   const rng = new RNG(((Date.now() ^ (p.level * 7919)) & 0x7fffffff) | 1);
-  const ilvl = Math.round(p.level * 2.45 + 40);
+  const ilvl = mythicIlvl(p.level, SEASON.num);
   for (const k of SLOT_KEYS) {
     const it = genItem(rng, ilvl, 5, k, p.cls);
     const old = p.gear[k];
@@ -304,8 +304,10 @@ function tryAscend(who, quiet) {
   if (isPlayer) grantMythicSetPlayer(); else { who.mythicAt = metaNow(); grantMythicSetRec(who); }
   SEASON.ascended.push({ n: nm, place, lv: who.lv || (isPlayer ? G.player.level : 0), at: metaNow(), isPlayer });
   const ord = ['first', 'second', 'third'][place - 1] || place + 'th';
+  const mp = Math.round((mythicPower(SEASON.num) - 1) * 100);
   chatPush('world', '\u2605 ' + nm + ' is the ' + ord + ' adventurer to reach level ' + ASCEND_LEVEL +
-    ' \u2014 ASCENDANT, clad in Mythic. ' + (MYTHIC_LIMIT - place) + ' seat(s) left.');
+    ' \u2014 ASCENDANT, clad in Mythic' + (mp > 0 ? ' of the ' + ordinal(SEASON.num) + ' Forging (+' + mp + '%)' : '') +
+    '. ' + (MYTHIC_LIMIT - place) + ' seat(s) left.');
   if (isPlayer) { banner('ASCENDANT', 'Level ' + ASCEND_LEVEL + ' \u2014 you are Ascendant #' + place); R.flash = 1; R.flashCol = [1, .3, .4]; }
   else if (!quiet) toast('<b class="q5">ASCENDANT</b><div class="tiny">' + esc(nm) + ' reached level ' + ASCEND_LEVEL + ' \u2014 seat ' + place + ' of ' + MYTHIC_LIMIT + '</div>', 'sys');
 

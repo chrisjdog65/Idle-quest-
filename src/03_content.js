@@ -554,7 +554,20 @@ const OV_MECH = [
 ];
 const OV_MECH_W = [16, 13, 11, 12, 9, 8, 7, 8, 8, 8];
 /** Item level of a relic taken off an Overlord fought at `level`. */
-function eternalIlvl(level) { return Math.round(refIlvl(Math.max(1, level)) * 1.18 + 60); }
+/* MYTHIC ESCALATES. Each season's three Ascendants are handed a set stronger than any
+   season before it -- the gear is theirs for that season only (it dies with the wipe like
+   all Mythic), but season 6's Mythic outclasses season 5's, so being Ascendant later in a
+   world's life means more. Compounding at MYTHIC_STEP keeps the climb visible without
+   running away: season 10 is 1.7x season 1, season 25 is 3.4x. */
+const MYTHIC_STEP = 0.062;
+function mythicPower(season) { return Math.pow(1 + MYTHIC_STEP, Math.max(0, (season || 1) - 1)); }
+function mythicIlvl(level, season) { return Math.round((level * 2.45 + 40) * mythicPower(season)); }
+/** The strongest Mythic that has ever existed, in item levels -- what Eternal must beat. */
+function mythicPeakIlvl() { return mythicIlvl(ASCEND_LEVEL, (typeof SEASON !== 'undefined' ? SEASON.num : 1)); }
+function eternalIlvl(level) {
+  // Eternal has to stay ahead of a Mythic that is itself climbing every season
+  return Math.round(Math.max(refIlvl(Math.max(1, level)) * 1.18 + 60, mythicPeakIlvl() * 1.16));
+}
 
 /* ------------------------------ ITEM ENGINE ------------------------------ */
 /** Roll a rarity tier from a drop-quality context (0=trash .. 5=mythic source) */

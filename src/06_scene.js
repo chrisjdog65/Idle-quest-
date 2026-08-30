@@ -136,10 +136,14 @@ function meshPyramid() {
 /* ------------------------------ MESH REGISTRY ------------------------------ */
 const M = {};      // instanced batch registry
 const GLX = {};     // non-batched GL objects (grass + particle buffers)
-const INST_MAX = { rbox: 4600, box: 2600, cyl: 3200, cone: 5200, sph: 5200, pyr: 700 };
+const INST_MAX = { rbox: 5200, plate: 4200, box: 2600, cyl: 3200, cone: 5200, sph: 5200, pyr: 700 };
 function buildMeshes() {
   const mk = (m, cap) => makeInstMesh(m.v, m.i, cap);
-  M.rbox = mk(meshRoundBox(5, .30), INST_MAX.rbox);
+  M.rbox = mk(meshRoundBox(7, .30), INST_MAX.rbox);
+  /* Armour needs an edge. The soft 0.30-radius box reads as cloth at any size, which is
+     why a full Mythic set looked like a jumper -- plate gets a tight bevel and more
+     segments so the highlight runs along a crease instead of smearing across a blob. */
+  M.plate = mk(meshRoundBox(9, .10), INST_MAX.plate);
   M.box = mk(meshBox(), INST_MAX.box);
   M.cyl = mk(meshCylinder(8, .62), INST_MAX.cyl);
   M.cone = mk(meshCone(9), INST_MAX.cone);
@@ -440,16 +444,23 @@ function drawCharacter(e, lod) {
   const cast = a.cast;                    // 0..1 cast pose
   const air = a.air;
   const sk = SKIN[e.skin % SKIN.length], hc = HAIRC[e.hair % HAIRC.length];
-  const gc = e.gearCol || [.5, .5, .55];
-  const gc2 = e.gearCol2 || [.35, .35, .4];
-  const acc = e.accent || [.7, .2, .2];
+  const gc = e.gearCol || [.42, .40, .38];
+  const gc2 = e.gearCol2 || [.30, .28, .27];
+  const trim = e.trim || e.accent || [.7, .2, .2];
+  const cloth = e.cloth || [.30, .25, .20];
   const glow = e.glow || 0;
   const gr = e.glowCol || [1, .6, .2];
+  const RG = e.rough == null ? .78 : e.rough;      // polish rises with tier
+  const tierN = e.tierN == null ? -1 : e.tierN;
   // a little self-illumination keeps silhouettes readable in deep shade
   const fill = (e.fill || 0) + (R.sky ? R.sky.night * 0.10 : 0);
+  // the trim glows on the best gear, which is what sells a set across a field
+  const tg = tierN >= 6 ? .55 : tierN >= 5 ? .38 : tierN >= 4 ? .18 : tierN >= 3 ? .07 : 0;
+  const P = M.plate, RB = M.rbox;
 
   const swing = Math.sin(t * 9.0) * spd;
   const swing2 = Math.sin(t * 9.0 + PI) * spd;
+  const breathe = Math.sin(t * 1.5) * 0.010 * (1 - spd);
   const bob = (Math.abs(Math.sin(t * 9.0)) * 0.055 + Math.sin(t * 1.6) * 0.012) * (0.4 + spd) * sc;
   let lean = spd * 0.12 + run * 0.16;
   let rootY = by + bob;
@@ -459,35 +470,82 @@ function drawCharacter(e, lod) {
 
   const S = sc;
   const hipY = rootY + 0.92 * S;
-  // --- torso ---
   const torsoR = bodyPitch + (cast ? -0.12 : 0) + Math.sin(t * 1.9) * 0.012;
-  partMat(_cm, 0, hipY - rootY + 0.30 * S, 0, torsoR, 0, 0, 0.52 * S, 0.62 * S, 0.32 * S, bx, rootY, bz, yaw);
-  pushInst(M.rbox, _cm, gc[0], gc[1], gc[2], glow * .5 + fill, 0, .72);
+  const chestY = hipY - rootY + 0.30 * S;
+
+  // --- torso: an under-layer of cloth, then the breastplate proud of it ---
+  partMat(_cm, 0, chestY, 0, torsoR, 0, 0, 0.50 * S, (0.62 + breathe) * S, 0.30 * S, bx, rootY, bz, yaw);
+  pushInst(RB, _cm, cloth[0], cloth[1], cloth[2], fill, 0, .85);
+  partMat(_cm, 0, chestY + 0.02 * S, 0.015 * S, torsoR, 0, 0, 0.53 * S, 0.50 * S, 0.33 * S, bx, rootY, bz, yaw);
+  pushInst(P, _cm, gc[0], gc[1], gc[2], fill, 0, RG);
   // --- pelvis ---
-  partMat(_cm, 0, hipY - rootY - 0.06 * S, 0, torsoR * .5, 0, 0, 0.44 * S, 0.26 * S, 0.30 * S, bx, rootY, bz, yaw);
-  pushInst(M.rbox, _cm, gc2[0], gc2[1], gc2[2], fill, 0, .8);
+  partMat(_cm, 0, hipY - rootY - 0.06 * S, 0, torsoR * .5, 0, 0, 0.42 * S, 0.26 * S, 0.29 * S, bx, rootY, bz, yaw);
+  pushInst(P, _cm, gc2[0], gc2[1], gc2[2], fill, 0, RG + .08);
   // --- head ---
   const headY = hipY - rootY + 0.74 * S;
   const hy = (e.headYaw || 0);
-  partMat(_cm, 0, headY, 0.02 * S, torsoR * .3 + (dead ? .3 : 0), hy, 0, 0.30 * S, 0.32 * S, 0.29 * S, bx, rootY, bz, yaw);
-  pushInst(M.rbox, _cm, sk[0], sk[1], sk[2], fill, 0, .92);
-  // hair / helm
+  const hR = torsoR * .3 + (dead ? .3 : 0);
   if (e.helm) {
-    partMat(_cm, 0, headY + 0.10 * S, 0, torsoR * .3, hy, 0, 0.34 * S, 0.26 * S, 0.33 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, gc[0] * 1.1, gc[1] * 1.1, gc[2] * 1.1, glow * .8 + fill, 0, .45);
+    /* A helm ENCLOSES the head. It used to be a cap perched on top, leaving a pale
+       skin blob as the brightest thing in the silhouette -- a full Mythic set read as
+       a bald man in a hat. Now the skull is armoured and only a face gap shows. */
+    partMat(_cm, 0, headY + 0.02 * S, 0, hR, hy, 0, 0.33 * S, 0.36 * S, 0.32 * S, bx, rootY, bz, yaw);
+    pushInst(P, _cm, gc[0] * 1.06, gc[1] * 1.06, gc[2] * 1.06, fill, 0, RG);
+    // the face gap, in shadow
+    partMat(_cm, 0, headY - 0.01 * S, 0.19 * S, hR, hy, 0, 0.18 * S, 0.14 * S, 0.10 * S, bx, rootY, bz, yaw);
+    pushInst(RB, _cm, sk[0] * .40, sk[1] * .36, sk[2] * .34, fill, 0, .95);
   } else {
-    partMat(_cm, 0, headY + 0.11 * S, -0.02 * S, torsoR * .3, hy, 0, 0.32 * S, 0.20 * S, 0.31 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, hc[0], hc[1], hc[2], fill, 0, .9);
+    partMat(_cm, 0, headY, 0.02 * S, hR, hy, 0, 0.29 * S, 0.31 * S, 0.28 * S, bx, rootY, bz, yaw);
+    pushInst(RB, _cm, sk[0], sk[1], sk[2], fill, 0, .92);
+    partMat(_cm, 0, headY + 0.11 * S, -0.02 * S, hR, hy, 0, 0.32 * S, 0.20 * S, 0.31 * S, bx, rootY, bz, yaw);
+    pushInst(RB, _cm, hc[0], hc[1], hc[2], fill, 0, .9);
   }
-  if (lod > 0) return;   // distant characters stop here (6 parts)
+  if (lod > 0) return;   // distant characters stop here
 
-  // --- shoulders (gear) ---
-  if (e.pads) {
-    for (const s of [-1, 1]) {
-      partMat(_cm, s * 0.34 * S, hipY - rootY + 0.55 * S, 0, torsoR, 0, s * 0.28, 0.26 * S, 0.20 * S, 0.28 * S, bx, rootY, bz, yaw);
-      pushInst(M.rbox, _cm, acc[0], acc[1], acc[2], glow + fill, 0, .4);
+  /* ---- the detail pass: everything below only draws up close ---- */
+
+  // helm brow band and crest -- what makes a good helm read as a good helm
+  if (e.helm) {
+    partMat(_cm, 0, headY + 0.11 * S, 0.17 * S, torsoR * .3, hy, 0, 0.34 * S, 0.06 * S, 0.07 * S, bx, rootY, bz, yaw);
+    pushInst(P, _cm, trim[0], trim[1], trim[2], tg, 0, RG * .6);
+    if (e.crest) {
+      const ch = 0.09 + e.crest * 0.042;
+      for (let k = 0; k < 3; k++) {
+        const f = k / 2;
+        partMat(_cm, 0, headY + 0.20 * S + (ch * (0.5 + f * 0.8)) * S, (-0.04 - f * 0.13) * S,
+          torsoR * .3 - .12 - f * .5, hy, 0, 0.035 * S, ch * (1 - f * .3) * S, (0.13 - f * .03) * S,
+          bx, rootY, bz, yaw);
+        pushInst(P, _cm, trim[0] * (1 - f * .2), trim[1] * (1 - f * .2), trim[2] * (1 - f * .2), tg * .7, 0, .5);
+      }
     }
   }
+  // gorget: the collar that separates a head from a torso
+  partMat(_cm, 0, headY - 0.20 * S, 0, torsoR * .4, hy * .4, 0, 0.26 * S, 0.10 * S, 0.25 * S, bx, rootY, bz, yaw);
+  pushInst(P, _cm, gc[0] * .84, gc[1] * .84, gc[2] * .84, fill, 0, RG);
+  // chest trim and belt
+  partMat(_cm, 0, chestY + 0.12 * S, 0.17 * S, torsoR, 0, 0, 0.20 * S, 0.20 * S, 0.05 * S, bx, rootY, bz, yaw);
+  pushInst(P, _cm, trim[0], trim[1], trim[2], tg, 0, RG * .5);
+  if (e.belt) {
+    partMat(_cm, 0, hipY - rootY + 0.04 * S, 0, torsoR * .7, 0, 0, 0.47 * S, 0.10 * S, 0.31 * S, bx, rootY, bz, yaw);
+    pushInst(P, _cm, gc2[0] * .8, gc2[1] * .8, gc2[2] * .85, fill, 0, RG + .1);
+    partMat(_cm, 0, hipY - rootY + 0.04 * S, 0.16 * S, torsoR * .7, 0, 0, 0.11 * S, 0.11 * S, 0.05 * S, bx, rootY, bz, yaw);
+    pushInst(P, _cm, trim[0], trim[1], trim[2], tg, 0, RG * .5);
+  }
+
+  // --- shoulders ---
+  if (e.pads) {
+    for (const s of [-1, 1]) {
+      partMat(_cm, s * 0.35 * S, hipY - rootY + 0.56 * S, 0, torsoR, 0, s * 0.30, 0.28 * S, 0.22 * S, 0.30 * S, bx, rootY, bz, yaw);
+      pushInst(P, _cm, gc[0] * 1.05, gc[1] * 1.05, gc[2] * 1.05, fill, 0, RG);
+      partMat(_cm, s * 0.37 * S, hipY - rootY + 0.64 * S, 0, torsoR, 0, s * 0.30, 0.24 * S, 0.06 * S, 0.26 * S, bx, rootY, bz, yaw);
+      pushInst(P, _cm, trim[0], trim[1], trim[2], tg, 0, RG * .5);
+      if (e.spikes) for (const k of [-1, 0, 1]) {
+        partMat(_cm, s * 0.40 * S, hipY - rootY + 0.72 * S, k * 0.11 * S, torsoR - .2, 0, s * 0.42, 0.05 * S, 0.17 * S, 0.05 * S, bx, rootY, bz, yaw);
+        pushInst(M.cone, _cm, trim[0], trim[1], trim[2], tg, 0, .35);
+      }
+    }
+  }
+
   // --- arms ---
   const atkSwing = atk > 0 ? Math.sin(atk * PI) : 0;
   for (const s of [-1, 1]) {
@@ -500,28 +558,31 @@ function drawCharacter(e, lod) {
     if (dead) { upR = 1.2; foreR = -0.2; }
     const shX = s * 0.42 * S, shY = hipY - rootY + 0.52 * S;
     partMat(_cm, shX, shY - 0.16 * S, Math.sin(upR) * 0.14 * S, upR, 0, s * 0.14, 0.17 * S, 0.40 * S, 0.17 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, gc[0] * .9, gc[1] * .9, gc[2] * .9, fill, 0, .7);
+    pushInst(P, _cm, gc[0] * .92, gc[1] * .92, gc[2] * .92, fill, 0, RG);
     const elY = shY - 0.36 * S - Math.cos(upR) * 0.06 * S;
     const elZ = Math.sin(upR) * 0.34 * S;
-    partMat(_cm, shX, elY - 0.16 * S, elZ + Math.sin(upR + foreR) * 0.14 * S, upR + foreR, 0, s * 0.06, 0.15 * S, 0.36 * S, 0.15 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, sk[0], sk[1], sk[2], fill, 0, .9);
-    // hand-held gear
-    const hY = elY - 0.34 * S, hZ = elZ + Math.sin(upR + foreR) * 0.32 * S;
-    if (isMain && e.wpn) {
-      const wr = upR + foreR - 1.25 + atkSwing * 0.9;
-      const wl = e.wpnLen || 1.0;
-      partMat(_cm, shX + s * 0.04 * S, hY + Math.cos(wr) * 0.35 * S * wl, hZ + Math.sin(wr) * 0.4 * S * wl,
-        wr, 0, 0, 0.09 * S, 0.95 * S * wl, 0.09 * S, bx, rootY, bz, yaw);
-      pushInst(M.rbox, _cm, e.wpnCol[0], e.wpnCol[1], e.wpnCol[2], e.wpnGlow || 0, 0, .25);
-      // pommel
-      partMat(_cm, shX + s * 0.04 * S, hY, hZ, wr, 0, 0, 0.14 * S, 0.14 * S, 0.14 * S, bx, rootY, bz, yaw);
-      pushInst(M.rbox, _cm, .28, .22, .16, fill, 0, .8);
+    const foY = elY - 0.16 * S, foZ = elZ + Math.sin(upR + foreR) * 0.14 * S;
+    // bare forearm, or a bracer over it
+    partMat(_cm, shX, foY, foZ, upR + foreR, 0, s * 0.06, 0.145 * S, 0.36 * S, 0.145 * S, bx, rootY, bz, yaw);
+    pushInst(RB, _cm, sk[0], sk[1], sk[2], fill, 0, .9);
+    if (e.bracer) {
+      partMat(_cm, shX, foY - 0.06 * S, foZ, upR + foreR, 0, s * 0.06, 0.175 * S, 0.20 * S, 0.175 * S, bx, rootY, bz, yaw);
+      pushInst(P, _cm, gc[0], gc[1], gc[2], fill, 0, RG);
     }
+    const hY = elY - 0.34 * S, hZ = elZ + Math.sin(upR + foreR) * 0.32 * S;
+    if (e.glove) {
+      partMat(_cm, shX, hY + 0.03 * S, hZ, upR + foreR, 0, s * 0.06, 0.15 * S, 0.14 * S, 0.15 * S, bx, rootY, bz, yaw);
+      pushInst(P, _cm, gc[0] * .9, gc[1] * .9, gc[2] * .9, fill, 0, RG);
+    }
+    if (isMain && e.wpn) drawWeapon(e, S, shX, hY, hZ, upR + foreR, atkSwing, bx, rootY, bz, yaw, fill);
     if (!isMain && e.shield) {
-      partMat(_cm, shX - s * 0.05 * S, hY + 0.16 * S, hZ + 0.12 * S, 0.2, 0, s * .2, 0.42 * S, 0.52 * S, 0.10 * S, bx, rootY, bz, yaw);
-      pushInst(M.rbox, _cm, acc[0] * .9, acc[1] * .9, acc[2] * .9, glow * .6 + fill, 0, .4);
+      partMat(_cm, shX - s * 0.05 * S, hY + 0.16 * S, hZ + 0.12 * S, 0.2, 0, s * .2, 0.42 * S, 0.54 * S, 0.09 * S, bx, rootY, bz, yaw);
+      pushInst(P, _cm, gc[0] * 1.02, gc[1] * 1.02, gc[2] * 1.02, fill, 0, RG);
+      partMat(_cm, shX - s * 0.05 * S, hY + 0.16 * S, hZ + 0.18 * S, 0.2, 0, s * .2, 0.17 * S, 0.20 * S, 0.05 * S, bx, rootY, bz, yaw);
+      pushInst(P, _cm, trim[0], trim[1], trim[2], tg, 0, RG * .5);
     }
   }
+
   // --- legs ---
   for (const s of [-1, 1]) {
     let th = (s > 0 ? swing2 : swing) * 0.95;
@@ -530,26 +591,101 @@ function drawCharacter(e, lod) {
     if (dead) { th = -0.3; kn = 0.5; }
     const hX = s * 0.19 * S;
     partMat(_cm, hX, hipY - rootY - 0.34 * S, Math.sin(th) * 0.14 * S, th, 0, 0, 0.20 * S, 0.46 * S, 0.20 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, gc2[0] * .95, gc2[1] * .95, gc2[2] * .95, fill, 0, .78);
+    pushInst(P, _cm, gc2[0] * .98, gc2[1] * .98, gc2[2] * .98, fill, 0, RG + .06);
     const kY = hipY - rootY - 0.56 * S - Math.cos(th) * 0.06 * S, kZ = Math.sin(th) * 0.4 * S;
+    // knee guard
+    partMat(_cm, hX, kY - 0.02 * S, kZ + 0.06 * S, th - kn * .5, 0, 0, 0.20 * S, 0.13 * S, 0.19 * S, bx, rootY, bz, yaw);
+    pushInst(P, _cm, gc[0] * .95, gc[1] * .95, gc[2] * .95, fill, 0, RG);
     partMat(_cm, hX, kY - 0.22 * S, kZ + Math.sin(th - kn) * 0.16 * S, th - kn, 0, 0, 0.18 * S, 0.44 * S, 0.18 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, gc2[0] * .8, gc2[1] * .8, gc2[2] * .8, fill, 0, .8);
-    // boot
-    partMat(_cm, hX, kY - 0.44 * S, kZ + Math.sin(th - kn) * 0.32 * S + 0.05 * S, 0, 0, 0, 0.20 * S, 0.13 * S, 0.30 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, .17, .13, .11, fill, 0, .85);
+    pushInst(P, _cm, gc2[0] * .84, gc2[1] * .84, gc2[2] * .84, fill, 0, RG + .06);
+    const bY = kY - 0.44 * S, bZ = kZ + Math.sin(th - kn) * 0.32 * S + 0.05 * S;
+    partMat(_cm, hX, bY, bZ, 0, 0, 0, 0.21 * S, 0.14 * S, 0.31 * S, bx, rootY, bz, yaw);
+    pushInst(P, _cm, .16, .12, .10, fill, 0, .82);
+    if (e.boots) {   // a cuff so boots are gear rather than feet
+      partMat(_cm, hX, bY + 0.10 * S, bZ - 0.03 * S, 0, 0, 0, 0.22 * S, 0.10 * S, 0.24 * S, bx, rootY, bz, yaw);
+      pushInst(P, _cm, gc[0] * .88, gc[1] * .88, gc[2] * .88, fill, 0, RG);
+    }
   }
-  // --- cape ---
+
+  /* --- cape: swings on real velocity, not just walk speed, and trails on a turn --- */
   if (e.cape) {
-    const cr = 0.18 + spd * 0.5 + Math.sin(t * 5) * 0.06 * spd;
-    partMat(_cm, 0, hipY - rootY + 0.22 * S, -0.20 * S - spd * 0.1 * S, cr, 0, 0, 0.52 * S, 0.82 * S, 0.05 * S, bx, rootY, bz, yaw);
-    pushInst(M.rbox, _cm, acc[0], acc[1], acc[2], glow * .4 + fill, 0, .55);
+    const vx = e.x - (e.px == null ? e.x : e.px), vz = e.z - (e.pz == null ? e.z : e.pz);
+    const lat = (vx * Math.cos(yaw) - vz * Math.sin(yaw));
+    const cr = 0.16 + spd * 0.55 + run * .18 + Math.sin(t * 5) * 0.05 * spd;
+    for (let k = 0; k < 3; k++) {
+      const f = k / 2;
+      partMat(_cm, lat * 5 * f * S, hipY - rootY + (0.30 - f * 0.42) * S,
+        (-0.19 - f * 0.30 - spd * 0.16 * f) * S, cr + f * .30, 0, lat * 3 * f,
+        (0.50 - f * .07) * S, 0.34 * S, 0.045 * S, bx, rootY, bz, yaw);
+      const cf = 0.62 - f * .12;
+      pushInst(RB, _cm, lerp(cloth[0], trim[0], cf), lerp(cloth[1], trim[1], cf), lerp(cloth[2], trim[2], cf),
+        fill * (1 - f * .4), 0, .74);
+    }
   }
-  // --- rarity aura for legendary / mythic gear ---
+  e.px = e.x; e.pz = e.z;
+
+  // --- rarity aura for the best gear ---
   if (glow > 0.35) {
     const every = glow > .8 ? 2 : 3;
     if ((R.frame + (e.id | 0) * 7) % every === 0)
       spawnPart(bx + (Math.random() - .5) * .9 * S, rootY + Math.random() * 1.9 * S, bz + (Math.random() - .5) * .9 * S,
         0, .45 + Math.random() * .5, 0, 1.1, (glow > .8 ? .30 : .22) * S, gr[0], gr[1], gr[2], .95, 0, .3, 0);
+  }
+}
+/* Weapons are built rather than being one box: a blade with a taper, a crossguard,
+   a grip and a pommel -- or a staff with a head, or a pair of short daggers. */
+function drawWeapon(e, S, shX, hY, hZ, armR, atkSwing, bx, rootY, bz, yaw, fill) {
+  const wr = armR - 1.25 + atkSwing * 0.9;
+  const wl = e.wpnLen || 1.0;
+  const wc = e.wpnCol || [.7, .72, .78], wt = e.wpnTrim || wc;
+  const wg = e.wpnGlow || 0, wR = e.wpnRough == null ? .3 : e.wpnRough;
+  const kind = e.wpnKind || 0;
+  const cs = Math.cos(wr), sn = Math.sin(wr);
+  const at = (d) => [shX + (kind === 1 ? 0.02 : 0.04) * S, hY + cs * d * S * wl, hZ + sn * d * S * wl];
+  if (kind === 2) {
+    // staff: a long haft with a glowing head
+    let q = at(0.42);
+    partMat(_cm, q[0], q[1], q[2], wr, 0, 0, 0.055 * S, 1.12 * S * wl, 0.055 * S, bx, rootY, bz, yaw);
+    pushInst(M.cyl, _cm, .30, .22, .16, fill, 0, .8);
+    q = at(1.02);
+    partMat(_cm, q[0], q[1], q[2], wr, 0, 0, 0.19 * S, 0.19 * S, 0.19 * S, bx, rootY, bz, yaw);
+    pushInst(M.sph, _cm, wt[0], wt[1], wt[2], 1.0 + wg, 0, .2);
+    q = at(0.86);
+    partMat(_cm, q[0], q[1], q[2], wr, 0, 0, 0.12 * S, 0.10 * S, 0.12 * S, bx, rootY, bz, yaw);
+    pushInst(M.plate, _cm, wc[0], wc[1], wc[2], wg * .4 + fill, 0, wR);
+    return;
+  }
+  // grip
+  let q = at(0.10);
+  partMat(_cm, q[0], q[1], q[2], wr, 0, 0, 0.055 * S, 0.20 * S, 0.055 * S, bx, rootY, bz, yaw);
+  pushInst(M.cyl, _cm, .24, .17, .13, fill, 0, .85);
+  // pommel
+  q = at(-0.03);
+  partMat(_cm, q[0], q[1], q[2], wr, 0, 0, 0.10 * S, 0.10 * S, 0.10 * S, bx, rootY, bz, yaw);
+  pushInst(M.sph, _cm, wt[0], wt[1], wt[2], wg * .5 + fill, 0, wR);
+  // crossguard
+  q = at(0.22);
+  partMat(_cm, q[0], q[1], q[2], wr, 0, PI / 2, 0.05 * S, 0.34 * S, 0.07 * S, bx, rootY, bz, yaw);
+  pushInst(M.plate, _cm, wt[0], wt[1], wt[2], wg * .6 + fill, 0, wR);
+  // blade: two stacked segments so it tapers to a point
+  q = at(0.58);
+  partMat(_cm, q[0], q[1], q[2], wr, 0, 0, 0.085 * S, 0.50 * S * wl, 0.030 * S, bx, rootY, bz, yaw);
+  pushInst(M.plate, _cm, wc[0], wc[1], wc[2], wg * .5 + fill, 0, wR);
+  q = at(0.94 * wl + 0.04);
+  partMat(_cm, q[0], q[1], q[2], wr, 0, 0, 0.055 * S, 0.30 * S * wl, 0.024 * S, bx, rootY, bz, yaw);
+  pushInst(M.plate, _cm, wc[0] * 1.1, wc[1] * 1.1, wc[2] * 1.1, wg * .7 + fill, 0, wR * .7);
+  // a fuller of trim down the blade on the good stuff
+  if ((e.wpnT || 0) >= 3) {
+    q = at(0.62);
+    partMat(_cm, q[0], q[1], q[2], wr, 0, 0, 0.022 * S, 0.56 * S * wl, 0.038 * S, bx, rootY, bz, yaw);
+    pushInst(M.plate, _cm, wt[0], wt[1], wt[2], .5 + wg, 0, .2);
+  }
+  // a swing leaves a trail on high-tier weapons
+  if (atkSwing > 0.25 && wg > 0.2 && (R.frame & 1) === 0) {
+    q = at(0.80 * wl);
+    const c2 = Math.cos(yaw), s2 = Math.sin(yaw);
+    spawnPart(bx + q[0] * c2 + q[2] * s2, rootY + q[1], bz - q[0] * s2 + q[2] * c2,
+      0, .2, 0, .30, .22 * S, wt[0], wt[1], wt[2], .85, 0, 0, 0);
   }
 }
 

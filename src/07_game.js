@@ -119,29 +119,60 @@ function rarityGlow(t) {
   if (t === 3) return { g: 0.26, c: [.70, .35, .95] };
   return { g: 0, c: [1, 1, 1] };
 }
+/* Armour base metal by rarity tier. Index is tier+1 so an empty slot (-1) lands on
+   travelling leather. This ramp is what makes tiers readable at a glance across a
+   crowd, long before you can see anyone's nameplate. */
+const ARMOUR_METAL = [
+  [.30, .25, .19],   // (none) worn leather
+  [.33, .32, .31],   // Common     dull iron
+  [.40, .34, .22],   // Uncommon   bronze
+  [.45, .49, .57],   // Rare       steel
+  [.38, .34, .48],   // Epic       dark silver, violet cast
+  [.58, .45, .20],   // Legendary  gold
+  [.22, .13, .17],   // Mythic     obsidian
+  [.60, .70, .76],   // Eternal    pale radiant alloy
+];
 function styleFromGear(e, gear, clsId) {
   const c = CLASS_BY[clsId] || CLASSES[0];
   const best = bestTierOf(gear);
   const rg = rarityGlow(best);
-  const chest = gear.chest, wpn = gear.weapon;
-  // With armour on, the torso takes the rarity colour tinted by class. With
-  // nothing equipped you wear plain travelling clothes, not bare skin.
-  const base = chest ? hexToRgb(RARITY[chest.t].c) : [.40, .34, .26];
-  const t = chest ? .45 : .82;
-  e.gearCol = [lerp(c.col[0], base[0], t), lerp(c.col[1], base[1], t), lerp(c.col[2], base[2], t)];
+  const chest = gear.chest, wpn = gear.weapon, head = gear.head;
+  /* Armour reads as METAL with the rarity as trim -- not as a body flooded with the
+     rarity colour, which made a full Mythic set look like a pink jumper. The metal
+     ramp climbs iron -> bronze -> steel -> dark silver -> gold -> obsidian -> radiant,
+     and the trim, the glow and the polish carry the tier. */
+  const mt = ARMOUR_METAL[clamp(chest ? chest.t : -1, -1, 6) + 1];
+  const trim = best >= 0 ? hexToRgb(RARITY[best].c) : [.42, .36, .28];
+  e.tierN = best;
+  e.metal = mt.slice();
+  e.trim = trim;
+  // a class tint keeps six warriors in a raid from looking identical
+  e.gearCol = [lerp(mt[0], c.col[0], .10), lerp(mt[1], c.col[1], .10), lerp(mt[2], c.col[2], .10)];
   e.gearCol2 = gear.legs
-    ? [e.gearCol[0] * .62, e.gearCol[1] * .62, e.gearCol[2] * .68]
-    : [.29, .24, .19];
-  e.accent = c.col.slice();
+    ? [e.gearCol[0] * .74, e.gearCol[1] * .74, e.gearCol[2] * .78]
+    : [.26, .21, .17];
+  e.cloth = chest ? [lerp(.20, c.col[0], .35), lerp(.18, c.col[1], .35), lerp(.19, c.col[2], .35)] : [.34, .28, .21];
+  e.accent = trim;
   e.glow = rg.g; e.glowCol = rg.c;
-  e.helm = !!gear.head; e.pads = !!gear.shoulder; e.cape = !!gear.back;
+  // polish: common gear is matte, the best gear is a mirror
+  e.rough = clamp(0.86 - Math.max(0, best) * 0.115, 0.10, 0.90);
+  e.helm = !!head; e.pads = !!gear.shoulder; e.cape = !!gear.back;
+  e.bracer = !!gear.wrist; e.glove = !!gear.hands; e.belt = !!gear.waist;
+  e.boots = !!gear.feet;
+  e.crest = !!head && (head.t >= 3 ? head.t - 2 : 0);      // 1..4 plume height at Epic+
+  e.spikes = !!gear.shoulder && gear.shoulder.t >= 3;
   e.shield = !!gear.offhand && (clsId === 'warrior' || clsId === 'paladin');
   e.wpn = true;
   const wt = wpn ? wpn.t : 0;
   const wc = RARITY[wt] ? hexToRgb(RARITY[wt].c) : [.62, .64, .68];
-  e.wpnCol = [lerp(.70, wc[0], .55), lerp(.72, wc[1], .55), lerp(.78, wc[2], .55)];
-  e.wpnGlow = wt >= 4 ? .8 : wt >= 3 ? .3 : 0;
+  const wm = ARMOUR_METAL[clamp(wt, 0, 6) + 1];
+  e.wpnCol = [lerp(wm[0], wc[0], .38), lerp(wm[1], wc[1], .38), lerp(wm[2], wc[2], .38)];
+  e.wpnTrim = wc;
+  e.wpnT = wt;
+  e.wpnGlow = wt >= 6 ? .70 : wt >= 5 ? .45 : wt >= 4 ? .20 : wt >= 3 ? .08 : 0;
+  e.wpnRough = clamp(0.62 - wt * 0.09, 0.06, 0.7);
   e.wpnLen = clsId === 'mage' || clsId === 'druid' ? 1.35 : clsId === 'rogue' ? .62 : 1.0;
+  e.wpnKind = clsId === 'mage' || clsId === 'druid' ? 2 : clsId === 'rogue' ? 1 : 0;  // staff / dagger / blade
 }
 function hexToRgb(h) {
   const n = parseInt(h.slice(1), 16);

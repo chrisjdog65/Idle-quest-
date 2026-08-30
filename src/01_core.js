@@ -193,6 +193,14 @@ function fmt(n) {
 }
 function fmtGold(n) { return fmt(n) + 'g'; }
 function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+/** 1 -> "First", 12 -> "12th". Used for season-numbered things the world names aloud. */
+const ORD_WORD = ['', 'First', 'Second', 'Third', 'Fourth', 'Fifth', 'Sixth', 'Seventh', 'Eighth', 'Ninth', 'Tenth'];
+function ordinal(n) {
+  n = Math.max(1, n | 0);
+  if (ORD_WORD[n]) return ORD_WORD[n];
+  const t = n % 100, u = n % 10;
+  return n + (t >= 11 && t <= 13 ? 'th' : u === 1 ? 'st' : u === 2 ? 'nd' : u === 3 ? 'rd' : 'th');
+}
 function dur(ms) {
   if (ms < 0) ms = 0;
   const s = Math.floor(ms / 1000), m = Math.floor(s / 60), h = Math.floor(m / 60), d = Math.floor(h / 24);
