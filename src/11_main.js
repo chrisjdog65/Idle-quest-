@@ -59,7 +59,7 @@ function saveGame() {
         milestone: SEASON.milestone, ascended: SEASON.ascended, ov: SEASON.ov },
       mythic: Array.from(MYTHIC_HOLDERS),
       firsts: FIRSTS, firstN: FIRST_N,
-      eternal: ETERNAL, achFirst: ACH_FIRST,
+      eternal: ETERNAL, achFirst: ACH_FIRST, achV: ACH_TABLE_V,
       set: SET,
       p: {
         n: p.name, c: p.cls, lv: p.level, xp: p.xp, gold: p.gold,
@@ -96,6 +96,7 @@ function applySave(d) {
   // relics are the one thing that outlives a season, so they load from their own key
   ETERNAL.p = (d.eternal && d.eternal.p) || []; ETERNAL.ai = (d.eternal && d.eternal.ai) || [];
   ACH_FIRST = d.achFirst || null;      // the Testament is forged once in the life of a save
+  const achStale = (d.achV | 0) !== ACH_TABLE_V;   // acted on after the roster and player load
   Object.assign(SET, d.set || {});
   R.quality = SET.quality;
   A.volMusic = SET.volm; A.volSfx = SET.vols;
@@ -123,6 +124,8 @@ function applySave(d) {
   p.res = CLASS_BY[p.cls].res === 'rage' ? 0 : p.resMax;
   styleFromGear(p, p.gear, p.cls);
   G.player = p;
+  // the table changed under this save: re-derive every board from its ledger
+  if (achStale) achRebuildAll();
   return d.ts;
 }
 

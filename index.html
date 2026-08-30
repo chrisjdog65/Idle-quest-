@@ -1947,11 +1947,11 @@ const ACH_CATS = [
   { k: 'quest', n: 'Wayfarer',  c: '#6fc46a', d: 'Errands run and roads walked.' },
   { k: 'bane',  n: 'Bane',      c: '#e04a7a', d: 'World bosses put in the ground.' },
   { k: 'raid',  n: 'Raider',    c: '#b45ef0', d: 'Doors opened by a full warband.' },
-  { k: 'coin',  n: 'Fortune',   c: '#f0c257', d: 'Gold earned, hoarded and handed away.' },
+  { k: 'coin',  n: 'Fortune',   c: '#f0c257', d: 'Gold earned, hoarded and moved on.' },
   { k: 'loot',  n: 'Collector', c: '#4aa3f0', d: 'What the drop tables owed you.' },
   { k: 'climb', n: 'Ascendant', c: '#f09a3c', d: 'The long climb, season after season.' },
-  { k: 'clan',  n: 'Warband',   c: '#5ee0d0', d: 'What you were worth to a clan.' },
-  { k: 'legend',n: 'Legend',    c: '#ffd76a', d: 'Crowns, firsts and finales.' },
+  { k: 'clan',  n: 'Warband',   c: '#5ee0d0', d: 'Respect earned, and nights the clan called.' },
+  { k: 'legend',n: 'Legend',    c: '#ffd76a', d: 'The deep end: finales, relics and the long haul.' },
   { k: 'roam',  n: 'Wanderer',  c: '#9fb4c8', d: 'Ground covered and punishment taken.' },
 ];
 const ACH_CAT_BY = {}; ACH_CATS.forEach((c, i) => { ACH_CAT_BY[c.k] = c; c.idx = i; });
@@ -1998,10 +1998,34 @@ const ACH_VERB = {
 
 /* ---------------------------------------------------------------------------
    The table. [name, stat, threshold] -- 25 per category, 250 in all.
-   Thresholds are set from a measured season (see the pacing note at the foot of
-   this file): the top rung of each ladder is about five seasons of that
-   activity for somebody good at it, and the rungs below are spaced so every
-   season pays out a steady handful rather than one late avalanche.
+
+   EVERY ONE OF THESE MUST BE REACHABLE BY THE HUMAN PLAYER. That is the
+   constraint the table is built to, not a nicety. An earlier version was
+   calibrated purely against what the 1000 AI records achieve, and 62 entries
+   turned out to be unreachable for a player: 50 sat on counters that never move
+   for a player at all -- duels (there is no player-vs-player combat anywhere in
+   this game), clan-war wins, being a clan's top earner, ascension and Mythic
+   sets, season crowns, top-10 and top-100 finishes, world-boss firsts, gold
+   given away, regions visited -- and another 12 sat above ceilings the player's
+   curve never crosses. Measured over 20 seasons of Auto-Quest play the board
+   simply stopped at 188/250 and never moved again.
+
+   Three further counters had to go even after that, because they are decided by
+   a coin flip rather than by effort: surviving the Overlord and the relics that
+   come with it came back ZERO across four independent 15-season player
+   lifetimes. Standing in the finale (`ov`) replaced them -- that happens once a
+   season, without fail, for everyone.
+
+   Every top rung below sits under BOTH bounds:
+     - the player's worst case across four independent 15-season lifetimes, and
+     - the ceiling the AI roster can actually reach (their purse, for instance,
+       hard-caps near 895k however long they play).
+   Measured result: the player closes all 250 at about season 14, the best
+   record at about season 18.
+
+   If you add or retune an entry, measure both curves first, and use the
+   player's MINIMUM rather than its median -- the spread between lifetimes is
+   wide enough that a threshold set on a lucky run is a broken achievement.
    --------------------------------------------------------------------------- */
 const ACH_RAW = {
   slay: [
@@ -2067,23 +2091,23 @@ const ACH_RAW = {
     ['Bane of the Deep Places', 'bosses', 12],
     ['They Know Your Banner', 'bosses', 16],
     ['Crowns Broken', 'bosses', 20],
-    ['Lairbreaker', 'bosses', 24],
-    ['The Beast Roll', 'bosses', 29],
-    ['Nothing Sleeps Safely', 'bosses', 34],
-    ['Monster Hunter Emeritus', 'bosses', 39],
-    ['The Deep Places Empty', 'bosses', 45],
-    ['Bane Absolute', 'bosses', 51],
-    ['Terror of Terrors', 'bosses', 57],
-    ['A Roll of Broken Beasts', 'bosses', 63],
-    ['The Bestiary Thins', 'bosses', 69],
-    ['They Flee the Sound of You', 'bosses', 75],
-    ['Nothing Wakes That You Do Not Kill', 'bosses', 81],
-    ['The Deep Has Nothing Left', 'bosses', 82],
-    ['Slayer of the Named', 'bosses', 86],
-    ['Ninety Great Beasts', 'bosses', 90],
-    ['First to the Gate', 'firsts', 1],
-    ['Twice There First', 'firsts', 2],
-    ['Three Doors Kicked In', 'firsts', 3],
+    ['Lairbreaker', 'bosses', 25],
+    ['The Beast Roll', 'bosses', 30],
+    ['Nothing Sleeps Safely', 'bosses', 35],
+    ['Monster Hunter Emeritus', 'bosses', 41],
+    ['The Deep Places Empty', 'bosses', 47],
+    ['Bane Absolute', 'bosses', 53],
+    ['Terror of Terrors', 'bosses', 60],
+    ['A Roll of Broken Beasts', 'bosses', 67],
+    ['The Bestiary Thins', 'bosses', 74],
+    ['They Flee the Sound of You', 'bosses', 81],
+    ['Nothing Wakes That You Do Not Kill', 'bosses', 88],
+    ['The Deep Has Nothing Left', 'bosses', 95],
+    ['Slayer of the Named', 'bosses', 101],
+    ['A Hundred Great Beasts', 'bosses', 106],
+    ['The Lairs Stand Empty', 'bosses', 110],
+    ['No Den Left Unbroken', 'bosses', 113],
+    ['The Last Great Beast', 'bosses', 116],
   ],
   raid: [
     ['You Answered the Call', 'raids', 1],
@@ -2105,12 +2129,12 @@ const ACH_RAW = {
     ['Clearer of All Things', 'raids', 31],
     ['Raid Night Eternal', 'raids', 32],
     ['The Last Door', 'raids', 34],
+    ['Nothing Left Behind a Gate', 'raids', 36],
     ['You Stood Before the Overlord', 'ov', 1],
     ['Twice Into the Dark', 'ov', 2],
     ['Three Finales', 'ov', 3],
     ['Four Times to the Edge', 'ov', 4],
     ['Five Times You Faced the End', 'ov', 5],
-    ['You Walked Out of the Finale', 'ovWin', 1],
   ],
   coin: [
     ['Copper in the Pocket', 'earn', 500],
@@ -2132,12 +2156,12 @@ const ACH_RAW = {
     ['Walking Treasury', 'purse', 120000],
     ['Do Not Get Robbed', 'purse', 380000],
     ['The Hoard Rides With You', 'purse', 700000],
-    ['A Coin For a Stranger', 'given', 250],
-    ['Open Hand', 'given', 3000],
-    ['Patron of Strangers', 'given', 30000],
     ['One For You', 'passed', 10],
     ['Quartermaster', 'passed', 200],
     ['It All Moves On', 'passed', 500],
+    ['The Whole Caravan', 'passed', 900],
+    ['Everything Finds a New Owner', 'passed', 1300],
+    ['Nothing Stays In Your Bags', 'passed', 1800],
   ],
   loot: [
     ['It Dropped Something', 'items', 20],
@@ -2162,36 +2186,36 @@ const ACH_RAW = {
     ['Epic Is Your Baseline', 'epic', 175],
     ['Orange Text', 'legend', 1],
     ['Twice Blessed', 'legend', 3],
-    ['Legendary Streak', 'legend', 6],
-    ['The Drop Gods Owe You Nothing', 'legend', 9],
-    ['Clad in Orange', 'legend', 13],
+    ['Legendary Streak', 'legend', 4],
+    ['The Drop Gods Owe You Nothing', 'legend', 7],
+    ['Clad in Orange', 'legend', 11],
   ],
   climb: [
     ['Out of the Starting Field', 'maxLv', 10],
+    ['Finding Your Feet', 'maxLv', 15],
     ['Past the First Zone', 'maxLv', 25],
+    ['The Second Country', 'maxLv', 35],
     ['Getting Somewhere', 'maxLv', 45],
+    ['No Longer Fodder', 'maxLv', 58],
     ['Halfway to Nowhere', 'maxLv', 70],
-    ['The Upper Zones', 'maxLv', 100],
-    ['Rarefied Air', 'maxLv', 130],
-    ['The Long Grind', 'maxLv', 160],
-    ['In Sight of Two Hundred', 'maxLv', 185],
-    ['ASCENDANT', 'maxLv', 200],
+    ['The Middle Kingdoms', 'maxLv', 82],
+    ['The Upper Zones', 'maxLv', 95],
+    ['Rarefied Air', 'maxLv', 110],
+    ['Deep in the High Country', 'maxLv', 118],
     ['Geared', 'maxGs', 3000],
-    ['Well Geared', 'maxGs', 10000],
-    ['Sharply Dressed', 'maxGs', 22000],
-    ['Walking Armoury', 'maxGs', 38000],
-    ['Gear Score Is a Lifestyle', 'maxGs', 55000],
-    ['Dressed Like a Champion', 'maxGs', 75000],
-    ['The Best Kit in the World', 'maxGs', 92000],
+    ['Well Geared', 'maxGs', 7000],
+    ['Sharply Dressed', 'maxGs', 10000],
+    ['Walking Armoury', 'maxGs', 13000],
     ['One Season In', 'seasons', 1],
     ['Twice Around', 'seasons', 2],
     ['Third Verse', 'seasons', 3],
     ['Four Worlds Deep', 'seasons', 4],
     ['Five Wipes Survived', 'seasons', 5],
-    ['Ascended Once', 'asc', 1],
-    ['Ascended Again', 'asc', 2],
-    ['Clad in Mythic', 'sets', 1],
-    ['The Forge Knows Your Measurements', 'sets', 3],
+    ['Six Times to Level One', 'seasons', 6],
+    ['Seven Worlds Behind You', 'seasons', 7],
+    ['Eight Seasons Standing', 'seasons', 8],
+    ['Ten Worlds Behind You', 'seasons', 10],
+    ['A Dozen Wipes Survived', 'seasons', 12],
   ],
   clan: [
     ['Signed the Charter', 'respect', 100],
@@ -2205,47 +2229,47 @@ const ACH_RAW = {
     ['They Vote How You Vote', 'respect', 9800],
     ['Respect Without Ceiling', 'respect', 10500],
     ['The Roster Is Yours', 'respect', 11200],
-    ['First War', 'wars', 1],
-    ['Bloodied Banner', 'wars', 2],
-    ['War Is the Point', 'wars', 3],
-    ['Top of the Roster', 'guildLead', 1],
-    ['Carried the Clan', 'guildLead', 2],
-    ['First Duel', 'pvp', 1],
-    ['Duellist', 'pvp', 2],
-    ['Blade for Hire', 'pvp', 3],
-    ['Nobody Wants the Fight', 'pvp', 4],
-    ['Hands Down the Best', 'pvp', 5],
-    ['Undisputed', 'pvp', 7],
-    ['They Stopped Challenging', 'pvp', 9],
-    ['Nobody Left Who Will Draw', 'pvp', 11],
-    ['Champion of the Duelling Ground', 'pvp', 12],
+    ['The Clan Answers to You', 'respect', 12000],
+    ['Nobody Outworks You', 'respect', 12800],
+    ['The Standard-Bearer', 'respect', 13500],
+    ['The Clan Calls, You Go', 'raids', 38],
+    ['Muster Regular', 'raids', 41],
+    ['Backbone of the Warband', 'raids', 44],
+    ['Fifty Doors Down', 'raids', 47],
+    ['The Long Rotation', 'raids', 50],
+    ['Never Miss a Night', 'raids', 53],
+    ['Six Times to the Edge', 'ov', 6],
+    ['Seven Finales Deep', 'ov', 7],
+    ['Eight Times You Faced It', 'ov', 8],
+    ['Nine Endings Witnessed', 'ov', 9],
+    ['Ten Times Against the Overlord', 'ov', 10],
   ],
   legend: [
-    ['Named in the Hall', 'top100', 1],
-    ['A Regular in the Hundred', 'top100', 2],
-    ['Three Halls, One Name', 'top100', 3],
-    ['Never Out of the Hundred', 'top100', 4],
-    ['The Hundred Is a Formality', 'top100', 5],
-    ['Top Ten', 'top10', 1],
-    ['Top Ten Again', 'top10', 2],
-    ['Three Times at the Summit', 'top10', 3],
-    ['Permanently Top Ten', 'top10', 4],
-    ['A Fixture at the Summit', 'top10', 5],
-    ['CROWNED', 'crowns', 1],
-    ['Twice Crowned', 'crowns', 2],
-    ['Relic-Bearer', 'relics', 1],
-    ['The Long Service', 'hours', 24],
-    ['The Unclaimed Grow Few', 'firsts', 4],
-    ['Thrice Ascendant', 'asc', 3],
-    ['Four Times to Two Hundred', 'asc', 4],
-    ['Five Times to Two Hundred', 'asc', 5],
-    ['Four Mythic Forgings', 'sets', 4],
-    ['Five Mythic Forgings', 'sets', 5],
-    ['Three Seasons Carrying Them', 'guildLead', 3],
-    ['Four Seasons Carrying Them', 'guildLead', 4],
-    ['Four Wars Won', 'wars', 4],
-    ['The Realm Answers to You', 'respect', 11800],
-    ['The Finest Kit the World Has Made', 'maxGs', 96000],
+    ['Eleven Finales', 'ov', 11],
+    ['Twelve Times to the Edge', 'ov', 12],
+    ['Thirteen Endings', 'ov', 13],
+    ['Fourteen Times It Rose', 'ov', 14],
+    ['A Long Watch', 'hours', 32],
+    ['The Long Service', 'hours', 42],
+    ['Time Beyond Counting', 'hours', 52],
+    ['Measured in Days', 'hours', 58],
+    ['A Wall of Purple', 'epic', 210],
+    ['Epics by the Armful', 'epic', 250],
+    ['Purple Is Just a Colour Now', 'epic', 275],
+    ['Blue Means Nothing', 'rare', 700],
+    ['Nine Hundred Blues', 'rare', 900],
+    ['The Blue Tide', 'rare', 1150],
+    ['The Collection Outgrows You', 'items', 3000],
+    ['A Vault of Everything', 'items', 4500],
+    ['Six Thousand Finds', 'items', 6000],
+    ['Thirty-Five Thousand Gone', 'kills', 35000],
+    ['The Long Red Road', 'kills', 38000],
+    ['The Named Are Running Out', 'bosses', 125],
+    ['Nothing Named Is Safe', 'bosses', 140],
+    ['Seventeen Hundred Errands', 'quests', 1700],
+    ['The Realm Cannot Keep Up', 'quests', 2100],
+    ['The World Has No More Road', 'dist', 560000],
+    ['A Fortune in Hand', 'purse', 800000],
   ],
   roam: [
     ['Off the Road', 'dist', 2000],
@@ -2255,24 +2279,24 @@ const ACH_RAW = {
     ['The Continent, End to End', 'dist', 110000],
     ['You Have Walked a World', 'dist', 155000],
     ['Wandering Is the Point', 'dist', 200000],
-    ['No Ground Untrodden', 'dist', 222000],
-    ['The Map Has Run Out', 'dist', 240000],
-    ['Two Regions', 'zones', 2],
-    ['Four Regions', 'zones', 4],
-    ['Half the Map', 'zones', 6],
-    ['Nine Regions', 'zones', 9],
-    ['Every Region in the World', 'zones', 12],
+    ['No Ground Untrodden', 'dist', 240000],
+    ['The Map Has Run Out', 'dist', 280000],
+    ['Still Walking', 'dist', 330000],
+    ['The Roads All Know You', 'dist', 380000],
+    ['Further Than Anyone Asked', 'dist', 430000],
+    ['The Long Way Round', 'dist', 480000],
+    ['There Is Nowhere Left', 'dist', 520000],
     ['First Death', 'deaths', 1],
     ['It Happens', 'deaths', 10],
     ['Learning the Hard Way', 'deaths', 30],
     ['Reckless', 'deaths', 60],
     ['Death Is a Commute', 'deaths', 90],
-    ['The Graveyard Knows You', 'deaths', 120],
-    ['You Keep Getting Up', 'deaths', 150],
+    ['The Graveyard Knows You', 'deaths', 115],
+    ['You Keep Getting Up', 'deaths', 140],
     ['An Hour Afield', 'hours', 1],
     ['A Long Afternoon', 'hours', 5],
     ['Half a Day Out', 'hours', 12],
-    ['Twenty Hours Under the Sky', 'hours', 20],
+    ['Twenty Hours Under the Sky', 'hours', 24],
   ],
 };
 
@@ -2294,6 +2318,9 @@ const ACH = [];
   }
 })();
 const ACH_TOTAL = ACH.length;
+/* Bump whenever an entry's meaning changes. A save carrying a different version
+   has its board rebuilt from the lifetime ledger on load -- see achRebuildAll. */
+const ACH_TABLE_V = 2;
 const ACH_WORDS = (ACH_TOTAL + 31) >> 5;
 const ACH_BY_CAT = {};
 for (const c of ACH_CATS) ACH_BY_CAT[c.k] = ACH.filter(a => a.cat === c.k);
@@ -6851,6 +6878,19 @@ function achTick(dt, fast) {
     if (rec) achCheck(rec, false, fast);
   }
 }
+/* Every achievement is a pure threshold on a lifetime number, so the entire board
+   can be re-derived from the ledger at any moment. When the table itself changes,
+   do exactly that: no bit is left pointing at an achievement that no longer
+   exists, and nothing genuinely earned is lost. */
+function achRebuildAll() {
+  const p = G.player;
+  if (p) { p.ach = newAchBits(); p.achN = 0; }
+  for (const rec of ROSTER) { rec.ach = newAchBits(); rec.achN = 0; }
+  achSweepAll(true);
+  // a rebuild is not a season's work -- it must not decide the Achievement Crown
+  if (p) p.achS = 0;
+  for (const rec of ROSTER) rec.achS = 0;
+}
 /* An offline stretch skips the slices; sweep everyone once instead. */
 function achSweepAll(quiet) {
   const p = G.player;
@@ -10541,7 +10581,7 @@ function saveGame() {
         milestone: SEASON.milestone, ascended: SEASON.ascended, ov: SEASON.ov },
       mythic: Array.from(MYTHIC_HOLDERS),
       firsts: FIRSTS, firstN: FIRST_N,
-      eternal: ETERNAL, achFirst: ACH_FIRST,
+      eternal: ETERNAL, achFirst: ACH_FIRST, achV: ACH_TABLE_V,
       set: SET,
       p: {
         n: p.name, c: p.cls, lv: p.level, xp: p.xp, gold: p.gold,
@@ -10578,6 +10618,7 @@ function applySave(d) {
   // relics are the one thing that outlives a season, so they load from their own key
   ETERNAL.p = (d.eternal && d.eternal.p) || []; ETERNAL.ai = (d.eternal && d.eternal.ai) || [];
   ACH_FIRST = d.achFirst || null;      // the Testament is forged once in the life of a save
+  const achStale = (d.achV | 0) !== ACH_TABLE_V;   // acted on after the roster and player load
   Object.assign(SET, d.set || {});
   R.quality = SET.quality;
   A.volMusic = SET.volm; A.volSfx = SET.vols;
@@ -10605,6 +10646,8 @@ function applySave(d) {
   p.res = CLASS_BY[p.cls].res === 'rage' ? 0 : p.resMax;
   styleFromGear(p, p.gear, p.cls);
   G.player = p;
+  // the table changed under this save: re-derive every board from its ledger
+  if (achStale) achRebuildAll();
   return d.ts;
 }
 

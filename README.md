@@ -74,9 +74,11 @@ season the world has ever run, and behind each name is a permanent ledger — ev
 they have ever killed, cleared, earned, walked and won.
 
 On top of that ledger sit **250 achievements**, held for you and for all thousand of
-them, forever. Levels reset. Gear resets. Achievements do not. They are paced so that
-somebody good closes the whole board at around **season five** — a handful land in your
-first hour, the last of them are five worlds away.
+them, forever. Levels reset. Gear resets. Achievements do not. A handful land in your
+first hour; closing the whole board takes roughly **fourteen seasons** of idling, and
+every single one of the 250 is reachable by a player who never touches the controls —
+each threshold sits under a measured worst-case player curve rather than under what the
+roster's best records manage.
 
 At every season's end a fourth crown is handed out: the **Achievement Crown**, to
 whoever earned the most *during* that season — not whoever holds the most, so a veteran
@@ -121,7 +123,7 @@ earning while the tab is closed. Turn it off any time and take over mid-fight.
 | **Ascendants** | Mythic is not a drop. The **first 3 adventurers to reach level 200** are handed it, and claiming the third seat starts the season's ten-minute final call |
 | **The Overlord** | A one-shot last stand between the crowns and the new season: 1001 against one boss, self-calibrated to a near-even fight, survivors only |
 | **Eternal** | A 7th rarity tier above Mythic, taken off the Overlord by those who survive it — the only gear that carries across the season wipe |
-| **Achievements** | **250** of them across 10 categories, permanent for you and for all 1000 AI adventurers — the only progress a season wipe cannot take. Paced at roughly five seasons to close the board |
+| **Achievements** | **250** of them across 10 categories, permanent for you and for all 1000 AI adventurers — the only progress a season wipe cannot take. Every one is reachable by the player: thresholds are drawn under a measured worst-case player trajectory, not the roster's |
 | **The Testament** | The first in the world to finish all 250 is clad at **5×** the strongest Mythic ever forged, kept across every season after. One only, ever |
 | **Four crowns** | Champion of Levels, Champion of Gear, the Trailblazer, and the **Achievement Crown** — most earned during the season, not most held — plus the crowned clan |
 | **Mythic escalation** | Every season's Mythic forging is 6.2% stronger than the last, compounding forever |

@@ -541,6 +541,19 @@ function achTick(dt, fast) {
     if (rec) achCheck(rec, false, fast);
   }
 }
+/* Every achievement is a pure threshold on a lifetime number, so the entire board
+   can be re-derived from the ledger at any moment. When the table itself changes,
+   do exactly that: no bit is left pointing at an achievement that no longer
+   exists, and nothing genuinely earned is lost. */
+function achRebuildAll() {
+  const p = G.player;
+  if (p) { p.ach = newAchBits(); p.achN = 0; }
+  for (const rec of ROSTER) { rec.ach = newAchBits(); rec.achN = 0; }
+  achSweepAll(true);
+  // a rebuild is not a season's work -- it must not decide the Achievement Crown
+  if (p) p.achS = 0;
+  for (const rec of ROSTER) rec.achS = 0;
+}
 /* An offline stretch skips the slices; sweep everyone once instead. */
 function achSweepAll(quiet) {
   const p = G.player;
