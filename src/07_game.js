@@ -973,6 +973,9 @@ function aiSay(e) {
 }
 function updateAIAvatar(e, dt, p) {
   if (e.dead) return;                  // nothing had ever damaged an avatar before the Overlord; a corpse kept walking and chatting
+  // a raid ally holds the line: their roster destination is wherever they were
+  // headed before the call, and drifting back to it mid-encounter looks like fleeing
+  if (e.raidAlly && e.rec && G.inRaid) { e.rec.tx = e.x; e.rec.tz = e.z; }
   e.an.t += dt;
   e.an.atk = Math.max(0, e.an.atk - dt * 2.6);
   e.atkCd = Math.max(0, e.atkCd - dt);
@@ -1113,7 +1116,7 @@ function updateSpawns(dt, p) {
   // ---- visible AI adventurers ----
   // Random sampling misses when few of the 1000 are nearby, so build the
   // in-range shortlist first and draw from that.
-  if (ROSTER.length && ais < MAX_AI) {
+  if (ROSTER.length && ais < MAX_AI && !G.inRaid) {
     NEARBY_AI.length = 0;
     for (let i = 0; i < ROSTER.length; i++) {
       const rec = ROSTER[i];

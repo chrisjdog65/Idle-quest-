@@ -145,7 +145,21 @@ let ovLastAlive = -1, ovDeltaT = 0;
 function ovHudBlock() {
   const O = G.overlord, bar = $('ovbar');
   if (!bar) return;
-  if (!O) { if (ovLastAlive !== -1) { bar.classList.remove('on'); ovLastAlive = -1; } return; }
+  // the same instrument serves a raid: one number, and it only ever falls
+  if (!O && G.inRaid && G.inRaid.wentN) {
+    const R2 = G.inRaid;
+    bar.classList.add('on');
+    $('ovLabel').textContent = 'YOUR CLAN';
+    $('ovCount').textContent = String(R2.aliveN);
+    if (ovLastAlive >= 0 && R2.aliveN < ovLastAlive) {
+      $('ovDelta').textContent = '−' + (ovLastAlive - R2.aliveN);
+      $('ovDelta').classList.add('on'); ovDeltaT = G.t;
+    } else if (G.t - ovDeltaT > 1.5) $('ovDelta').classList.remove('on');
+    ovLastAlive = R2.aliveN;
+    return;
+  }
+  if (!O) { if (ovLastAlive !== -1) { bar.classList.remove('on'); ovLastAlive = -1; $('ovLabel').textContent = 'STANDING'; } return; }
+  $('ovLabel').textContent = 'STANDING';
   bar.classList.add('on');
   // never fmt() this one: "1.00K standing" is not the same sentence as "1001 standing"
   $('ovCount').textContent = String(O.alive);

@@ -456,6 +456,27 @@ function buildContent() {
   buildZones(); buildQuests(); buildBosses(); buildRaids();
 }
 
+/* ------------------------------ RAID NIGHT ------------------------------
+   startRaid has always printed "you have entered with 39 allies" and spawned none
+   of them. AI_STATES has a 'raid' row at weight 9, so ~90 of the thousand are
+   permanently described as raiding at real portals -- and there has never been a
+   code path anywhere in this game where another adventurer is on screen BECAUSE
+   they are your clanmate.
+
+   Your clan calls a raid, announces it, and answers it. The allies who come are
+   real records off your guild's roster, they fight beside you, and some of them
+   do not walk out. Casualties resolve as a per-encounter tape so watching,
+   idling and being asleep all give the same answer. */
+const RN = {
+  CALL_MIN: 420, CALL_MAX: 900,   // seconds between one clan calling and the next
+  MUSTER: 90,                     // seconds between the call and the doors opening
+  VISIBLE: 12,                    // allies given real bodies; the rest are the counter
+  ANSWER_LO: 0.35, ANSWER_HI: 0.8,// share of the clan that turns up
+  RISK: 0.055,                    // base share of the party an encounter takes
+  RISKLV: 26,                     // level deficit at which an encounter is brutal
+  RISKMAX: 0.42,
+};
+
 /* ------------------------------ FIRST BLOOD ------------------------------
    One hundred world bosses. One hundred firsts. Each claimable exactly once, by
    exactly one of the thousand, and never again for the rest of the season.

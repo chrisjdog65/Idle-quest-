@@ -157,6 +157,17 @@ const AUTO = {
     if (mode !== 'all' && mode !== 'raid') return false;
     // a raid has to be worth the walk: the range we will travel grows with level
     const reach = 380 + p.level * 7;
+    /* Raid Night: if your own clan has called one and you can clear it, that is where
+       you are going -- distance and level spread stop mattering, because turning up is
+       the entire point of a clan calling a raid. */
+    if (RAID_CALL && RAID_CALL.isMine && !raidAvailable(DB.raids[RAID_CALL.rid])
+      && !this.isBlocked('raid:' + RAID_CALL.rid)) {
+      const cr = DB.raids[RAID_CALL.rid];
+      if (V.dist(p.x, p.z, cr.x, cr.zz) < 26) { if (startRaid(cr.id)) { this.lastRaid = this.t; return true; } }
+      this.setGoal(cr.x, cr.zz, 'raid', 'Raid night — ' + cr.n, 'raid:' + cr.id);
+      this.act = 'raid'; this.actLabel = 'Answering the call'; this.committed = 1;
+      return true;
+    }
     const ready = DB.raids.filter(r => !raidAvailable(r) && r.lv <= p.level && r.lv >= p.level - 40
       && !this.isBlocked('raid:' + r.id) && V.dist2(p.x, p.z, r.x, r.zz) < reach * reach);
     if (!ready.length) { this.lastRaid = this.t - 120; return false; }   // re-check soon

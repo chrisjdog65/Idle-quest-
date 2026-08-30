@@ -1728,6 +1728,27 @@ function buildContent() {
   buildZones(); buildQuests(); buildBosses(); buildRaids();
 }
 
+/* ------------------------------ RAID NIGHT ------------------------------
+   startRaid has always printed "you have entered with 39 allies" and spawned none
+   of them. AI_STATES has a 'raid' row at weight 9, so ~90 of the thousand are
+   permanently described as raiding at real portals -- and there has never been a
+   code path anywhere in this game where another adventurer is on screen BECAUSE
+   they are your clanmate.
+
+   Your clan calls a raid, announces it, and answers it. The allies who come are
+   real records off your guild's roster, they fight beside you, and some of them
+   do not walk out. Casualties resolve as a per-encounter tape so watching,
+   idling and being asleep all give the same answer. */
+const RN = {
+  CALL_MIN: 420, CALL_MAX: 900,   // seconds between one clan calling and the next
+  MUSTER: 90,                     // seconds between the call and the doors opening
+  VISIBLE: 12,                    // allies given real bodies; the rest are the counter
+  ANSWER_LO: 0.35, ANSWER_HI: 0.8,// share of the clan that turns up
+  RISK: 0.055,                    // base share of the party an encounter takes
+  RISKLV: 26,                     // level deficit at which an encounter is brutal
+  RISKMAX: 0.42,
+};
+
 /* ------------------------------ FIRST BLOOD ------------------------------
    One hundred world bosses. One hundred firsts. Each claimable exactly once, by
    exactly one of the thousand, and never again for the rest of the season.
@@ -5175,6 +5196,9 @@ function aiSay(e) {
 }
 function updateAIAvatar(e, dt, p) {
   if (e.dead) return;                  // nothing had ever damaged an avatar before the Overlord; a corpse kept walking and chatting
+  // a raid ally holds the line: their roster destination is wherever they were
+  // headed before the call, and drifting back to it mid-encounter looks like fleeing
+  if (e.raidAlly && e.rec && G.inRaid) { e.rec.tx = e.x; e.rec.tz = e.z; }
   e.an.t += dt;
   e.an.atk = Math.max(0, e.an.atk - dt * 2.6);
   e.atkCd = Math.max(0, e.atkCd - dt);
@@ -5315,7 +5339,7 @@ function updateSpawns(dt, p) {
   // ---- visible AI adventurers ----
   // Random sampling misses when few of the 1000 are nearby, so build the
   // in-range shortlist first and draw from that.
-  if (ROSTER.length && ais < MAX_AI) {
+  if (ROSTER.length && ais < MAX_AI && !G.inRaid) {
     NEARBY_AI.length = 0;
     for (let i = 0; i < ROSTER.length; i++) {
       const rec = ROSTER[i];
@@ -5678,6 +5702,9 @@ const MYTHIC_HOLDERS = new Set();
 const FIRSTS = {};
 let FIRST_N = 0;
 let metaAcc = 0, warT = 180, tradeT = 40, worldEventT = 300;
+/* RAID NIGHT: the raid your clan has called, and who answered. One at a time,
+   world-wide, so it is an event rather than wallpaper. */
+let RAID_CALL = null, raidCallT = 240;
 
 /* ------------------------------ ROSTER ------------------------------ */
 const AI_STATES = [
@@ -6003,6 +6030,14 @@ function metaTick(dt) {
     if (Math.random() < .45) makeIncomingOffer();
     if (Math.random() < .30) aiAskPlayer();
   }
+  // ---- raid night ----
+  raidCallT -= dt;
+  if (raidCallT <= 0) {
+    raidCallT = RN.CALL_MIN + Math.random() * (RN.CALL_MAX - RN.CALL_MIN);
+    if (!RAID_CALL && !G.inRaid) callRaid();
+  }
+  // a call nobody answered in time resolves itself as news
+  if (RAID_CALL && !G.inRaid && metaNow() > RAID_CALL.at + 180000) resolveCalledRaid();
   // ---- world events ----
   worldEventT -= dt;
   if (worldEventT <= 0) { worldEventT = 240 + Math.random() * 300; worldEvent(); }
@@ -6021,6 +6056,7 @@ function metaOffline(ms) {
     META_NOW = startTs + s * realStep * 1000;      // simulated wall clock
     for (let i = 0; i < ROSTER.length; i++) advanceRec(ROSTER[i], realStep, true);
     if ((s % 12) === 0) runClanWar(true);
+    if ((s % 9) === 0) { if (RAID_CALL) resolveCalledRaid(); callRaid(); }
     if (SEASON.milestone && META_NOW > SEASON.milestone + SEASON_GRACE_MS) break;
     if (META_NOW > SEASON.start + SEASON_MS) break;   // the 7-day backstop ends the roster's season too
   }
@@ -6441,20 +6477,114 @@ function raidAvailable(r) {
   if (Date.now() < until) return 'Locked ' + durShort(until - Date.now());
   return null;
 }
+/** A clan calls a raid. The player's own clan calls disproportionately often --
+    it is the only one they can answer, and an event nobody can attend is wallpaper. */
+function callRaid() {
+  if (RAID_CALL || !GUILDS.length) return;
+  const p = G.player;
+  const mine = p && p.guild != null && GUILDS[p.guild] ? GUILDS[p.guild] : null;
+  const g = (mine && Math.random() < 0.55) ? mine : GUILDS[(Math.random() * GUILDS.length) | 0];
+  if (!g || !g.members.length) return;
+  // the clan picks a raid it can actually clear: median member level decides
+  const lv = g.members.map(i => ROSTER[i] ? ROSTER[i].lv : 1).sort((a, b) => a - b)[g.members.length >> 1] || 1;
+  const cands = DB.raids.filter(r => r.lv <= lv + 4 && r.lv >= lv - 45);
+  if (!cands.length) return;
+  const r = cands.sort((a, b) => b.lv - a.lv)[(Math.random() * Math.min(4, cands.length)) | 0];
+  const share = RN.ANSWER_LO + Math.random() * (RN.ANSWER_HI - RN.ANSWER_LO);
+  const answered = g.members.slice().sort(() => Math.random() - .5)
+    .slice(0, Math.max(4, Math.round(g.members.length * share)));
+  RAID_CALL = { gid: g.i, rid: r.id, at: metaNow() + RN.MUSTER * 1000, answered, done: 0,
+    isMine: !!(mine && g.i === mine.i) };
+  const line = g.n + ' CALL ' + r.n.toUpperCase() + ' — ' + answered.length + ' ANSWER';
+  if (RAID_CALL.isMine) {
+    chatPush('guild', '\u2694 ' + line + ' \u00b7 the doors open in ' + Math.round(RN.MUSTER / 60) + ' minutes');
+    toast('<b style="color:#8fc6ff">RAID NIGHT</b><div class="tiny">' + esc(g.n) + ' call ' + esc(r.n) +
+      '<br>' + answered.length + ' answer \u00b7 muster at the portal</div>', 'big');
+    sfx('portal', .8);
+  } else chatPush('world', '\u2694 ' + line);
+}
+/** Resolve a called raid the player did not attend, and report it as news. */
+function resolveCalledRaid() {
+  const C = RAID_CALL; if (!C) return;
+  const g = GUILDS[C.gid], r = DB.raids[C.rid];
+  RAID_CALL = null;
+  if (!g || !r) return;
+  const lv = C.answered.map(i => ROSTER[i] ? ROSTER[i].lv : 1);
+  const avg = lv.reduce((a, b) => a + b, 0) / Math.max(1, lv.length);
+  let alive = C.answered.length;
+  for (let b = 0; b < r.bosses.length && alive > 0; b++) {
+    const risk = raidEncounterRisk(r, DB.bosses[r.bosses[b]], avg);
+    for (let k = alive - 1; k >= 0; k--) if (Math.random() < risk) alive--;
+  }
+  const cleared = alive > 0;
+  if (cleared) {
+    g.raids++; g.respect += r.respect;
+    for (const i of C.answered) { const rec = ROSTER[i]; if (rec) rec.raids++; }
+    chatPush('world', '\ud83c\udfc6 ' + g.n + ' cleared ' + r.n + ' \u2014 ' + alive + ' of ' +
+      C.answered.length + ' walked out');
+  } else {
+    chatPush('world', '\u2620 ' + g.n + ' wiped in ' + r.n);
+    RAID_LOCK[r.id] = Date.now() + r.lock;
+  }
+}
+/** How much of a party an encounter takes. Level deficit is what kills. */
+function raidEncounterRisk(r, bd, avgLv) {
+  const deficit = Math.max(0, (bd ? bd.lv : r.lv) - avgLv);
+  return clamp(RN.RISK + deficit / RN.RISKLV * 0.28 + r.tier * 0.006, 0.012, RN.RISKMAX);
+}
 function startRaid(rid) {
   const p = G.player, r = DB.raids[rid];
   const err = raidAvailable(r);
   if (err) { toast(err, 'sys'); sfx('error', .7); return false; }
-  G.inRaid = { r, boss: 0, hp: 0, t: 0, killed: 0, loot: [], cur: null, nextT: 0 };
+  G.inRaid = { r, boss: 0, hp: 0, t: 0, killed: 0, loot: [], cur: null, nextT: 0,
+    allies: [], aliveN: 0, wentN: 0, fallen: [], deathQ: [] };
   RAID_LOCK[r.id] = Date.now() + r.lock;
   panelClose();
-  banner(r.n, r.size + '-player raid · ' + r.bosses.length + ' encounters');
-  chatPush('guild', 'You have entered ' + r.n + ' with ' + (r.size - 1) + ' allies.');
-  musicSet('raid'); sfx('portal', 1);
   // teleport to the portal so the fight happens in the world
   p.x = r.x + 6; p.z = r.zz + 6; p.y = groundH(p.x, p.z);
+  raidMuster(r);
+  const R2 = G.inRaid;
+  banner(r.n, R2.wentN ? R2.wentN + ' went in together' : r.bosses.length + ' encounters, alone');
+  chatPush('guild', R2.wentN
+    ? 'You have entered ' + r.n + ' with ' + R2.wentN + ' of your clan.'
+    : 'You have entered ' + r.n + ' alone.');
+  musicSet('raid'); sfx('portal', 1);
   raidNextBoss();
   return true;
+}
+/* Who walks in with you. Your clan first -- that is the whole point -- and only
+   if you have none does the world fill in. RN.VISIBLE of them get real bodies in
+   a ring around the portal; the rest are carried by the counter, because MAX_AI is
+   34 and every nameplate inside 78 m is sorted and occlusion-tested every frame. */
+function raidMuster(r) {
+  const p = G.player, R2 = G.inRaid;
+  const called = RAID_CALL && RAID_CALL.isMine && RAID_CALL.rid === r.id ? RAID_CALL.answered : null;
+  let pool = [];
+  if (called) pool = called.slice();
+  else if (p.guild != null && GUILDS[p.guild]) pool = GUILDS[p.guild].members.slice();
+  if (!pool.length) {
+    // no clan: the world sends whoever is near and of a level to survive it
+    pool = ROSTER.filter(rec => Math.abs(rec.lv - Math.max(r.lv, p.level)) < 40)
+      .sort(() => Math.random() - .5).slice(0, r.size - 1).map(rec => rec.i);
+  }
+  pool = pool.filter(i => ROSTER[i]).slice(0, Math.max(0, r.size - 1));
+  R2.wentN = pool.length; R2.aliveN = pool.length;
+  // strongest get the bodies, so the ring around you reads as your clan's best
+  const ranked = pool.slice().sort((a, b) => ROSTER[b].lv - ROSTER[a].lv);
+  const show = new Set(ranked.slice(0, RN.VISIBLE).map(i => i));
+  for (const i of pool) {
+    const rec = ROSTER[i];
+    const a = Math.random() * TAU, rad = 5 + Math.random() * 7;
+    let e = null;
+    if (show.has(i)) {
+      rec.x = p.x + Math.cos(a) * rad; rec.z = p.z + Math.sin(a) * rad;
+      rec.tx = rec.x; rec.tz = rec.z;
+      e = spawnAIAvatar(rec);
+      if (e) e.raidAlly = 1;
+    }
+    R2.allies.push({ i, rec, e, dead: 0 });
+  }
+  if (R2.wentN) sfx('questdone', .7);
 }
 function raidNextBoss() {
   const R2 = G.inRaid; if (!R2) return;
@@ -6468,6 +6598,23 @@ function raidNextBoss() {
   e.raidBoss = 1; e.hpMax = Math.round(e.hpMax * (0.55 + R2.r.tier * 0.12)); e.hp = e.hpMax;
   e.st = 'chase';
   R2.cur = e;
+  /* Roll this encounter's casualties ONCE, now, then spread them across it -- the
+     same shape as the Overlord's tape, so what you watch is what actually happened
+     and a reload cannot re-roll it. */
+  const living = R2.allies.filter(a => !a.dead);
+  if (living.length) {
+    const avg = living.reduce((s, a) => s + a.rec.lv, 0) / living.length;
+    const risk = raidEncounterRisk(R2.r, bd, avg);
+    R2.deathQ = [];
+    for (const a of living) {
+      // your own level relative to the party carries a little of it: a strong
+      // adventurer in a weak clan pulls people through
+      const own = clamp(1 - (a.rec.lv - avg) / 60, 0.55, 1.5);
+      if (Math.random() < risk * own) R2.deathQ.push({ a, at: 4 + Math.random() * 26 });
+    }
+    R2.deathQ.sort((x, y) => x.at - y.at);
+    R2.encT = 0;
+  }
   banner('ENCOUNTER ' + (R2.boss + 1) + '/' + R2.r.bosses.length, bd.n + ', ' + bd.t);
   sfx('roar', 1);
 }
@@ -6475,6 +6622,8 @@ function finishRaid(cleared) {
   const R2 = G.inRaid; if (!R2) return;
   const p = G.player, r = R2.r;
   G.inRaid = null;
+  if (RAID_CALL && RAID_CALL.rid === r.id && RAID_CALL.isMine) RAID_CALL = null;
+  for (const a of R2.allies) if (a.e) { a.e.remove = 1; if (a.rec) a.rec.av = null; }
   AUTO.lastRaid = AUTO.t;
   AUTO.goalKind = ''; AUTO.committed = 0; AUTO.thinkT = 0;
   if (cleared) {
@@ -6485,14 +6634,23 @@ function finishRaid(cleared) {
     if (p.guild != null && GUILDS[p.guild]) { GUILDS[p.guild].respect += r.respect; GUILDS[p.guild].raids++; }
     const loot = rollLoot(p, Math.max(r.lv, p.level), r.lootTier, 2 + ((Math.random() * 3) | 0));
     for (const it of loot) giveItem(p, it);
-    banner('RAID CLEARED', r.n + ' · +' + fmt(gold) + 'g · +' + r.respect + ' respect');
-    chatPush('world', '🏆 ' + p.name + '\'s group cleared ' + r.n + '!');
+    const out = R2.aliveN, went = R2.wentN;
+    banner('RAID CLEARED', went
+      ? out + ' of ' + went + ' walked out · +' + fmt(gold) + 'g'
+      : r.n + ' · +' + fmt(gold) + 'g · +' + r.respect + ' respect');
+    if (went) {
+      const gname = p.guild != null && GUILDS[p.guild] ? GUILDS[p.guild].n : p.name + '\'s group';
+      chatPush('world', '\ud83c\udfc6 ' + gname + ' cleared ' + r.n + ' — ' + out + ' of ' + went + ' walked out');
+      if (R2.fallen.length) chatPush('guild', 'We lost ' + R2.fallen.map(f => f.n).join(', ') + '.');
+      for (const a of R2.allies) if (!a.dead) a.rec.raids++;
+    } else chatPush('world', '\ud83c\udfc6 ' + p.name + ' cleared ' + r.n + ' alone!');
     musicSet('victory');
     G.musicState = 'victory';
     G.victoryT = 16;
   } else {
-    banner('RAID FAILED', r.n);
-    chatPush('guild', 'The raid wiped in ' + r.n + '.');
+    banner('RAID FAILED', R2.wentN ? R2.wentN - R2.aliveN + ' of ' + R2.wentN + ' fell with you' : r.n);
+    const gname2 = p.guild != null && GUILDS[p.guild] ? GUILDS[p.guild].n : p.name + '\'s group';
+    chatPush('world', '\u2620 ' + gname2 + ' wiped in ' + r.n);
   }
 }
 /* Encounter pacing runs on game time, not setTimeout: background tabs throttle
@@ -6502,6 +6660,24 @@ function raidTick(dt) {
   R2.t += dt;
   const p = G.player;
   if (p.dead) { finishRaid(false); return; }
+  // allies fall at the times this encounter's roll gave them
+  if (R2.cur && R2.deathQ && R2.deathQ.length) {
+    R2.encT = (R2.encT || 0) + dt;
+    while (R2.deathQ.length && R2.deathQ[0].at <= R2.encT) {
+      const d = R2.deathQ.shift(), a = d.a;
+      if (a.dead) continue;
+      a.dead = 1; R2.aliveN--;
+      R2.fallen.push({ n: a.rec.n, lv: a.rec.lv, at: Math.round(R2.t) });
+      a.rec.deaths++;
+      if (a.e && !a.e.dead) ovKillAvatar(a.e);
+      // name them: an anonymous number falling is arithmetic, a name is a loss
+      chatPush('guild', a.rec.n + ' is down.');
+    }
+  }
+  if (R2.wentN && R2.aliveN <= 0 && R2.cur && !R2.cur.dead) {
+    chatPush('guild', 'Everyone is down. You are the last one standing.');
+    if (!R2.lastStand) { R2.lastStand = 1; banner('LAST ONE STANDING', R2.r.n); sfx('roar', .8); }
+  }
   if (R2.cur && R2.cur.dead) {
     R2.boss++; R2.killed++; R2.cur = null; R2.nextT = 2.6;
     if (R2.boss >= R2.r.bosses.length) { finishRaid(true); return; }
@@ -7071,6 +7247,7 @@ function startNewSeason() {
   /* open whispers and queued replies reference pre-wipe roster indices; left alive
      they re-point at whoever the rebuilt roster puts at that index */
   PENDING.length = 0; CONVO.length = 0;
+  RAID_CALL = null; raidCallT = 240;
   if (typeof AUTO !== 'undefined') { AUTO.reset(); AUTO._snap = null; }
   // reset the player to level 1 with nothing but a plain weapon
   const p = G.player;
@@ -7239,7 +7416,21 @@ let ovLastAlive = -1, ovDeltaT = 0;
 function ovHudBlock() {
   const O = G.overlord, bar = $('ovbar');
   if (!bar) return;
-  if (!O) { if (ovLastAlive !== -1) { bar.classList.remove('on'); ovLastAlive = -1; } return; }
+  // the same instrument serves a raid: one number, and it only ever falls
+  if (!O && G.inRaid && G.inRaid.wentN) {
+    const R2 = G.inRaid;
+    bar.classList.add('on');
+    $('ovLabel').textContent = 'YOUR CLAN';
+    $('ovCount').textContent = String(R2.aliveN);
+    if (ovLastAlive >= 0 && R2.aliveN < ovLastAlive) {
+      $('ovDelta').textContent = '−' + (ovLastAlive - R2.aliveN);
+      $('ovDelta').classList.add('on'); ovDeltaT = G.t;
+    } else if (G.t - ovDeltaT > 1.5) $('ovDelta').classList.remove('on');
+    ovLastAlive = R2.aliveN;
+    return;
+  }
+  if (!O) { if (ovLastAlive !== -1) { bar.classList.remove('on'); ovLastAlive = -1; $('ovLabel').textContent = 'STANDING'; } return; }
+  $('ovLabel').textContent = 'STANDING';
   bar.classList.add('on');
   // never fmt() this one: "1.00K standing" is not the same sentence as "1001 standing"
   $('ovCount').textContent = String(O.alive);
@@ -8885,6 +9076,17 @@ const AUTO = {
     if (mode !== 'all' && mode !== 'raid') return false;
     // a raid has to be worth the walk: the range we will travel grows with level
     const reach = 380 + p.level * 7;
+    /* Raid Night: if your own clan has called one and you can clear it, that is where
+       you are going -- distance and level spread stop mattering, because turning up is
+       the entire point of a clan calling a raid. */
+    if (RAID_CALL && RAID_CALL.isMine && !raidAvailable(DB.raids[RAID_CALL.rid])
+      && !this.isBlocked('raid:' + RAID_CALL.rid)) {
+      const cr = DB.raids[RAID_CALL.rid];
+      if (V.dist(p.x, p.z, cr.x, cr.zz) < 26) { if (startRaid(cr.id)) { this.lastRaid = this.t; return true; } }
+      this.setGoal(cr.x, cr.zz, 'raid', 'Raid night — ' + cr.n, 'raid:' + cr.id);
+      this.act = 'raid'; this.actLabel = 'Answering the call'; this.committed = 1;
+      return true;
+    }
     const ready = DB.raids.filter(r => !raidAvailable(r) && r.lv <= p.level && r.lv >= p.level - 40
       && !this.isBlocked('raid:' + r.id) && V.dist2(p.x, p.z, r.x, r.zz) < reach * reach);
     if (!ready.length) { this.lastRaid = this.t - 120; return false; }   // re-check soon
