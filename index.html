@@ -8962,6 +8962,26 @@ function setupInput() {
     if (e.code === 'Escape') panelClose();
   });
   window.addEventListener('keyup', e => { keys[e.code] = 0; });
+  /* ---- the admin console ----
+     Type the word, lower case, while playing. Case-sensitive on purpose: e.key keeps
+     the shift state, so CHRIS does not open it. Typing into a field never counts. */
+  let adminBuf = '';
+  window.addEventListener('keydown', e => {
+    if (e.target && e.target.tagName === 'INPUT') { adminBuf = ''; return; }
+    if (!e.key || e.key.length !== 1) return;
+    adminBuf = (adminBuf + e.key).slice(-16);
+    if (adminBuf.endsWith(ADMIN_WORD)) { adminBuf = ''; adminOpen(); }
+  });
+  /* A phone has no keyboard, so the same console answers five quick taps on the
+     season clock -- deliberate enough that it never happens by accident. */
+  { let taps = 0, last = 0;
+    const el2 = $('season');
+    if (el2) el2.addEventListener('pointerdown', () => {
+      const now = performance.now();
+      taps = (now - last < 600) ? taps + 1 : 1;
+      last = now;
+      if (taps >= 5) { taps = 0; adminOpen(); }
+    }); }
   G.keys = keys;
 
   // ---- buttons ----
@@ -9017,6 +9037,7 @@ const PANEL_DEF = {
   raid: { t: 'Raids & Bosses', tabs: ['Raids', 'World Bosses'] },
   hof: { t: 'Hall of Fame', tabs: ['Top 100', 'Top 20 Clans', 'Ascendants', 'First Blood', 'Past Seasons'] },
   ach: { t: 'Achievements', tabs: ['Your Board', 'All 250', 'Leaders', 'The Testament'] },
+  admin: { t: 'Admin', tabs: ['You', 'Adventurers', 'Gear', 'Season'] },
   social: { t: 'Adventurers', tabs: ['Online', 'Whispers', 'Chat'] },
   opts: { t: 'Settings', tabs: ['Game', 'Graphics', 'Audio', 'About'] },
 };
@@ -9050,6 +9071,13 @@ function panelClose() {
   $('panel').classList.remove('on');
   document.querySelectorAll('#bar .mb').forEach(b => b.classList.remove('on'));
   hideTip();
+}
+/* True while a field in the open panel has focus. The frame loop's automatic repaint
+   has to hold off then, or it wipes what is being typed -- but an explicit render from
+   a button or a tab must still go through, which is why this is not inside renderPanel. */
+function typingInPanel() {
+  const ae = document.activeElement;
+  return !!(ae && ae.tagName === 'INPUT' && $('pbody').contains(ae));
 }
 function renderPanel() {
   if (!PANEL) return;
@@ -9667,6 +9695,125 @@ const PANEL_RENDER = {
     return h;
   },
 
+  /* ---------------------------------------------------------------- ADMIN
+     A cheat console for the owner of a single-player world. Summoned by typing
+     ADMIN_WORD, or five quick taps on the season clock. Never listed in the menu
+     bar, so it does not exist until it is called for. */
+  admin(tab) {
+    const p = G.player;
+    const num = (id, val, ph) => '<input id="' + id + '" type="number" inputmode="numeric" value="' + val +
+      '" placeholder="' + (ph || '') + '" style="width:100%;padding:7px 9px;border-radius:8px;background:#0a0f18;' +
+      'border:1px solid var(--edge2);color:#e9e2cf;font:inherit;font-size:13px">';
+    const btn = (act, v, label, cls) => '<div class="btn sm ' + (cls || '') + '" data-act="' + act +
+      '" data-v="' + (v == null ? '' : v) + '">' + label + '</div>';
+
+    if (tab === 0) {
+      let h = '<div class="card center" style="border-color:#e0492f"><b style="color:#e0492f">ADMIN CONSOLE</b>' +
+        '<div class="tiny" style="margin-top:4px">Your world, your rules. Nothing here is validated and nothing is undone — ' +
+        'changes are live the moment you apply them, and they save with everything else.</div></div>';
+      h += '<h4 class="sec">Level</h4>' +
+        '<div class="tiny">Currently level ' + p.level + '.</div>' +
+        '<div style="display:flex;gap:6px;align-items:center;margin:6px 0">' +
+        '<div style="flex:1">' + num('adLv', p.level) + '</div>' + btn('adLv', null, 'Set') + '</div>' +
+        '<div style="display:flex;gap:5px;flex-wrap:wrap">' +
+        btn('adLvAdd', '1', '+1') + btn('adLvAdd', '10', '+10') + btn('adLvAdd', '50', '+50') +
+        btn('adLvAdd', '-10', '−10') + btn('adLvSet', String(ASCEND_LEVEL), 'Level ' + ASCEND_LEVEL) + '</div>';
+      h += '<h4 class="sec">Gold</h4>' +
+        '<div class="tiny">Currently ' + fmt(p.gold) + 'g.</div>' +
+        '<div style="display:flex;gap:6px;align-items:center;margin:6px 0">' +
+        '<div style="flex:1">' + num('adGold', Math.round(p.gold)) + '</div>' + btn('adGold', null, 'Set') + '</div>' +
+        '<div style="display:flex;gap:5px;flex-wrap:wrap">' +
+        btn('adGoldAdd', '10000', '+10K') + btn('adGoldAdd', '1000000', '+1M') +
+        btn('adGoldAdd', '100000000', '+100M') + btn('adGoldSet', '0', 'Zero') + '</div>';
+      h += '<h4 class="sec">Achievements</h4>' +
+        '<div class="tiny">Holding <b style="color:#ffd766">' + (p.achN || 0) + '</b> of ' + ACH_TOTAL +
+        '. Setting a number awards exactly that many, from the top of the list down. ' +
+        'Reaching ' + ACH_TOTAL + ' forges the Testament, if nobody has taken it yet.</div>' +
+        '<div style="display:flex;gap:6px;align-items:center;margin:6px 0">' +
+        '<div style="flex:1">' + num('adAch', p.achN || 0) + '</div>' + btn('adAch', null, 'Set') + '</div>' +
+        '<div style="display:flex;gap:5px;flex-wrap:wrap">' +
+        btn('adAchSet', '0', 'None') + btn('adAchSet', '125', 'Half') +
+        btn('adAchSet', String(ACH_TOTAL - 1), String(ACH_TOTAL - 1)) +
+        btn('adAchSet', String(ACH_TOTAL), 'ALL ' + ACH_TOTAL, 'gold') + '</div>';
+      return h;
+    }
+
+    if (tab === 1) {
+      const sel = ADMIN.target != null ? ROSTER[ADMIN.target] : null;
+      let h = '<div class="tiny">Pick an adventurer, then set their level or gold. Bulk controls at the foot apply to all ' + POP + '.</div>';
+      if (sel) {
+        h += '<div class="card" style="border-color:var(--gold);margin:7px 0">' +
+          '<b style="color:var(--gold)">' + CLASS_BY[sel.c].ic + ' ' + esc(sel.n) + '</b>' +
+          '<div class="tiny">Level ' + sel.lv + ' ' + CLASS_BY[sel.c].n + ' · ' + fmt(Math.round(sel.gold)) + 'g · ' +
+          fmt(sel.gs) + ' gear · ' + (sel.achN || 0) + '/' + ACH_TOTAL + ' achievements' +
+          (sel.g >= 0 && GUILDS[sel.g] ? ' · ' + esc(GUILDS[sel.g].n) : '') + '</div>' +
+          '<div style="display:flex;gap:6px;align-items:center;margin-top:7px">' +
+          '<div style="flex:1">' + num('adTLv', sel.lv) + '</div>' + btn('adTLv', null, 'Set level') + '</div>' +
+          '<div style="display:flex;gap:6px;align-items:center;margin-top:5px">' +
+          '<div style="flex:1">' + num('adTGold', Math.round(sel.gold)) + '</div>' + btn('adTGold', null, 'Set gold') + '</div>' +
+          '<div style="display:flex;gap:6px;align-items:center;margin-top:5px">' +
+          '<div style="flex:1">' + num('adTAch', sel.achN || 0) + '</div>' + btn('adTAch', null, 'Set achievements') + '</div>' +
+          '</div>';
+      }
+      h += '<h4 class="sec">Everyone</h4><div style="display:flex;gap:6px;align-items:center;margin:6px 0">' +
+        '<div style="flex:1">' + num('adAllLv', 1, 'level') + '</div>' + btn('adAllLv', null, 'Set all levels') + '</div>' +
+        '<div style="display:flex;gap:6px;align-items:center;margin:6px 0">' +
+        '<div style="flex:1">' + num('adAllGold', 0, 'gold') + '</div>' + btn('adAllGold', null, 'Set all gold') + '</div>';
+      h += '<h4 class="sec">Roster</h4>' +
+        '<div class="tiny">Highest level first. Tap a name to select.</div>' +
+        '<table class="lb"><tr><th>#</th><th>Name</th><th>Lv</th><th>Gold</th><th>Ach</th></tr>';
+      const list = ROSTER.slice().sort((a2, b2) => b2.lv - a2.lv).slice(0, 40);
+      list.forEach((r, i) => {
+        h += '<tr class="' + (ADMIN.target === r.i ? 'me' : '') + '" data-act="adPick" data-v="' + r.i + '">' +
+          '<td class="tiny">' + (i + 1) + '</td><td><b>' + esc(r.n) + '</b></td><td>' + r.lv + '</td>' +
+          '<td class="tiny">' + fmt(Math.round(r.gold)) + '</td><td class="tiny">' + (r.achN || 0) + '</td></tr>';
+      });
+      return h + '</table>';
+    }
+
+    if (tab === 2) {
+      const lv = Math.max(1, p.level);
+      const ilv = t => t >= 6 ? eternalIlvl(lv) : t === 5 ? mythicIlvl(lv, SEASON.num) : Math.round(refIlvl(lv));
+      let h = '<div class="tiny">A full fifteen-slot set at your current level (' + lv + '), replacing what you wear. ' +
+        'Item level follows the same maths the game uses for that rarity.</div>';
+      h += '<div class="card" style="margin:7px 0"><div class="row"><span class="k">Current</span><b class="q' +
+        Math.max(0, bestTierOf(p.gear)) + '">' + (bestTierOf(p.gear) >= 0 ? RARITY[bestTierOf(p.gear)].n : 'nothing') +
+        '</b></div><div class="row"><span class="k">Gear score</span><b>' + fmt(p.st.gs) + '</b></div></div>';
+      h += '<h4 class="sec">Grant a Set</h4>';
+      for (let t = 0; t < RARITY.length; t++) {
+        h += '<div class="row"><span class="k q' + t + '">' + RARITY[t].n + '<div class="tiny" style="opacity:.7">item level ' +
+          ilv(t) + '</div></span>' + btn('adGear', String(t), 'Equip', t >= 5 ? 'gold' : '') + '</div>';
+      }
+      h += '<h4 class="sec">The Testament</h4>' +
+        '<div class="tiny">The completionist prize: item level ' + testamentIlvl() + ', which is ' + ACH_PRIZE_MULT +
+        '× the strongest Mythic this world has forged (' + mythicPeakIlvl() + ').' +
+        (ACH_FIRST ? ' Already claimed by <b>' + esc(ACH_FIRST.n) + '</b> in season ' + ACH_FIRST.season + '.' : '') + '</div>' +
+        '<div style="margin-top:7px">' + btn('adTestament', null, 'Equip the full Testament set', 'gold') + '</div>';
+      return h;
+    }
+
+    // ---- season ----
+    let h = '<div class="card center"><b style="color:var(--gold)">SEASON ' + SEASON.num + '</b>' +
+      '<div class="tiny" style="margin-top:4px">' + (SEASON.ended ? 'This season has already ended.' :
+        'Ends ' + (SEASON.milestone ? 'in ' + dur(Math.max(0, SEASON.milestone + SEASON_GRACE_MS - metaNow()))
+          : dur(seasonLeft()) + ' from now') + '.') + '</div>' +
+      '<div class="tiny">' + MYTHIC_HOLDERS.size + ' of ' + MYTHIC_LIMIT + ' Ascendant seats claimed · ' +
+      FIRST_N + ' of ' + DB.bosses.length + ' world-boss firsts taken</div></div>';
+    h += '<h4 class="sec">Finish It</h4>' +
+      '<div class="tiny">Ending a season crowns the champions, runs the Overlord finale and archives the result, ' +
+      'exactly as it would if the third Ascendant had just claimed their seat.</div>' +
+      '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:7px">' +
+      btn('adEndSeason', null, 'End season now', 'gold') +
+      btn('adNextSeason', null, 'End it and start the next') + '</div>';
+    h += '<h4 class="sec">Jump Ahead</h4>' +
+      '<div class="tiny">Run the world forward without waiting — every adventurer levels, loots, raids and ' +
+      'takes firsts, and your own idle progress is credited too.</div>' +
+      '<div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:7px">' +
+      btn('adFF', '3600', 'Skip 1 hour') + btn('adFF', '21600', 'Skip 6 hours') +
+      btn('adFF', '86400', 'Skip a day') + '</div>';
+    return h;
+  },
+
   /* ---------------------------------------------------------------- SOCIAL */
   social(tab) {
     if (tab === 0) {
@@ -9775,9 +9922,109 @@ const PANEL_RENDER = {
 };
 
 /* ------------------------------ PANEL ACTIONS ------------------------------ */
+/* ------------------------------ ADMIN CONSOLE ------------------------------ */
+/* The owner's console for a single-player world. Everything here writes straight
+   into live state and then re-derives whatever depends on it, because half-applied
+   cheats are worse than no cheats: a level set without calcStats leaves you with
+   the health pool of the character you used to be. */
+const ADMIN_WORD = 'chris';
+const ADMIN = { target: null };
+function adminOpen() {
+  if (!G.started || !G.player) return;
+  PANEL_MODAL = false;
+  if (PANEL === 'admin') { panelClose(); return; }
+  PANEL = null;
+  panelOpen('admin');
+  toast('<b style="color:#e0492f">ADMIN CONSOLE</b><div class="tiny">Type it again, or five taps on the season clock, to close.</div>', 'sys');
+}
+function adminNum(id, fallback) {
+  const e = document.getElementById(id);
+  const n = e ? parseFloat(e.value) : NaN;
+  return isFinite(n) ? n : fallback;
+}
+/** Level is not just a number: stats, resource pool and health all hang off it. */
+function adminSetLevel(lv) {
+  const p = G.player;
+  p.level = clamp(Math.round(lv), 1, 100000);
+  p.xp = 0;
+  p.st = calcStats(p); p.resMax = resourceMax(p);
+  p.hp = p.st.hpMax; p.res = CLASS_BY[p.cls].res === 'rage' ? 0 : p.resMax;
+  styleFromGear(p, p.gear, p.cls);
+  banner('LEVEL ' + p.level, 'set from the console');
+}
+function adminSetGold(g) {
+  const p = G.player;
+  p.gold = Math.max(0, Math.round(g));
+  toast('Gold set to ' + fmt(p.gold) + 'g', 'sys');
+}
+/** Award exactly n achievements, taken from the top of the list. */
+function adminSetAch(who, n, isPlayer) {
+  n = clamp(Math.round(n), 0, ACH_TOTAL);
+  const bits = newAchBits();
+  for (let i = 0; i < n; i++) achSetBit(bits, i);
+  who.ach = bits; who.achN = n;
+  const lf = isPlayer ? playerLedger(who) : (who.lf || (who.lf = newLifeLedger()));
+  lf.ach = n;
+  // crossing the line forges the Testament, exactly as earning it would
+  if (n >= ACH_TOTAL) achFinish(who, isPlayer, false);
+  else if (isPlayer) toast('Achievements set to ' + n + ' / ' + ACH_TOTAL, 'sys');
+}
+/** A full fifteen-slot set at the item level the game itself would use for that tier. */
+function adminGearSet(tier) {
+  const p = G.player;
+  const lv = Math.max(1, p.level);
+  const il = tier >= 6 ? eternalIlvl(lv) : tier === 5 ? mythicIlvl(lv, SEASON.num) : Math.round(refIlvl(lv));
+  const rng = new RNG(((Math.random() * 1e9) | 0) | 1);
+  for (const slot of SLOT_KEYS) p.gear[slot] = genItem(rng, il, tier, slot, p.cls);
+  p.st = calcStats(p); p.resMax = resourceMax(p); p.hp = p.st.hpMax;
+  styleFromGear(p, p.gear, p.cls);
+  uiDirty.all = 1;
+  banner(RARITY[tier].n.toUpperCase(), 'full set · item level ' + il);
+}
+function adminSetRecLevel(rec, lv) {
+  rec.lv = clamp(Math.round(lv), 1, 100000);
+  rec.lp = 0;
+  rec.gs = recGearScore(rec);
+}
+/* Skipping time runs the real offline path, so the world that comes back is the
+   world that would have happened -- not a scaled guess. */
+function adminFastForward(secs) {
+  const ms = secs * 1000;
+  metaOffline(ms);
+  playerOffline0(ms);
+  achSweepAll(false);
+  checkSeason();
+  uiDirty.all = 1;
+  toast('Skipped ' + dur(ms) + ' — the world moved on without you', 'sys');
+}
 function PANEL_ACT(a, v, node) {
   const p = G.player;
   switch (a) {
+    /* ---- admin console ---- */
+    case 'adLv': adminSetLevel(adminNum('adLv', p.level)); renderPanel(); break;
+    case 'adLvSet': adminSetLevel(+v); renderPanel(); break;
+    case 'adLvAdd': adminSetLevel(p.level + (+v)); renderPanel(); break;
+    case 'adGold': adminSetGold(adminNum('adGold', p.gold)); renderPanel(); break;
+    case 'adGoldSet': adminSetGold(+v); renderPanel(); break;
+    case 'adGoldAdd': adminSetGold(p.gold + (+v)); renderPanel(); break;
+    case 'adAch': adminSetAch(p, adminNum('adAch', p.achN || 0), true); renderPanel(); break;
+    case 'adAchSet': adminSetAch(p, +v, true); renderPanel(); break;
+    case 'adPick': ADMIN.target = +v; sfx('ui', .6); renderPanel(); break;
+    case 'adTLv': { const r = ROSTER[ADMIN.target]; if (r) { adminSetRecLevel(r, adminNum('adTLv', r.lv)); sfx('ui', .7); } renderPanel(); break; }
+    case 'adTGold': { const r = ROSTER[ADMIN.target]; if (r) { r.gold = Math.max(0, Math.round(adminNum('adTGold', r.gold))); sfx('coin', .7); } renderPanel(); break; }
+    case 'adTAch': { const r = ROSTER[ADMIN.target]; if (r) { adminSetAch(r, adminNum('adTAch', r.achN || 0), false); sfx('ui', .7); } renderPanel(); break; }
+    case 'adAllLv': { const n = adminNum('adAllLv', 1); for (const r of ROSTER) adminSetRecLevel(r, n);
+      toast('All ' + POP + ' adventurers set to level ' + Math.round(n), 'sys'); renderPanel(); break; }
+    case 'adAllGold': { const n = Math.max(0, Math.round(adminNum('adAllGold', 0))); for (const r of ROSTER) r.gold = n;
+      toast('All ' + POP + ' adventurers set to ' + fmt(n) + 'g', 'sys'); renderPanel(); break; }
+    case 'adGear': adminGearSet(+v); renderPanel(); break;
+    case 'adTestament': { grantTestamentPlayer(p); uiDirty.all = 1;
+      banner('THE TESTAMENT', 'item level ' + testamentIlvl()); renderPanel(); break; }
+    case 'adEndSeason': { if (SEASON.ended) { toast('This season has already ended.', 'sys'); break; }
+      panelClose(); endSeason(false); break; }
+    case 'adNextSeason': { if (!SEASON.ended) endSeason(true);
+      panelClose(); if (G.overlord) G.overlord = null; ovStartNextSeason(); break; }
+    case 'adFF': adminFastForward(+v); renderPanel(); break;
     case 'equip': { const bi = p.bags.findIndex(b => b.u === +v); if (bi >= 0) equipItem(p, bi); uiDirty.bag = 1; renderPanel(); break; }
     case 'bagclick': { const bi = p.bags.findIndex(b => b.u === +v); if (bi >= 0) equipItem(p, bi); renderPanel(); break; }
     case 'unequip': {
@@ -11045,13 +11292,13 @@ function loop(ts) {
   drawOverlay();
   drawMinimap(dt);
   updateHUD(dt);
-  if (PANEL && (R.frame % 30) === 0 && (PANEL === 'hof' || PANEL === 'social' || PANEL === 'guild')) {
+  if (PANEL && (R.frame % 30) === 0 && !typingInPanel() && (PANEL === 'hof' || PANEL === 'social' || PANEL === 'guild')) {
     // live leaderboards refresh while you watch them
     if ($('ptabs').firstChild && $('ptabs').firstChild.dataset.act !== 'back') renderPanel();
   }
   /* the dirty flags finally have readers: an open bag repaints when auto-play equips or
      sells underneath it, the quest log when progress ticks, and anything on a season event */
-  if (PANEL && !PANEL_MODAL) {
+  if (PANEL && !PANEL_MODAL && !typingInPanel()) {
     if ((uiDirty.bag && PANEL === 'bag') || (uiDirty.quests && PANEL === 'quest') || uiDirty.all) {
       renderPanel();
       uiDirty.bag = 0; uiDirty.quests = 0; uiDirty.all = 0;

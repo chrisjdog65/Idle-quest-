@@ -523,13 +523,13 @@ function loop(ts) {
   drawOverlay();
   drawMinimap(dt);
   updateHUD(dt);
-  if (PANEL && (R.frame % 30) === 0 && (PANEL === 'hof' || PANEL === 'social' || PANEL === 'guild')) {
+  if (PANEL && (R.frame % 30) === 0 && !typingInPanel() && (PANEL === 'hof' || PANEL === 'social' || PANEL === 'guild')) {
     // live leaderboards refresh while you watch them
     if ($('ptabs').firstChild && $('ptabs').firstChild.dataset.act !== 'back') renderPanel();
   }
   /* the dirty flags finally have readers: an open bag repaints when auto-play equips or
      sells underneath it, the quest log when progress ticks, and anything on a season event */
-  if (PANEL && !PANEL_MODAL) {
+  if (PANEL && !PANEL_MODAL && !typingInPanel()) {
     if ((uiDirty.bag && PANEL === 'bag') || (uiDirty.quests && PANEL === 'quest') || uiDirty.all) {
       renderPanel();
       uiDirty.bag = 0; uiDirty.quests = 0; uiDirty.all = 0;

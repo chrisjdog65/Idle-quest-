@@ -660,6 +660,26 @@ function setupInput() {
     if (e.code === 'Escape') panelClose();
   });
   window.addEventListener('keyup', e => { keys[e.code] = 0; });
+  /* ---- the admin console ----
+     Type the word, lower case, while playing. Case-sensitive on purpose: e.key keeps
+     the shift state, so CHRIS does not open it. Typing into a field never counts. */
+  let adminBuf = '';
+  window.addEventListener('keydown', e => {
+    if (e.target && e.target.tagName === 'INPUT') { adminBuf = ''; return; }
+    if (!e.key || e.key.length !== 1) return;
+    adminBuf = (adminBuf + e.key).slice(-16);
+    if (adminBuf.endsWith(ADMIN_WORD)) { adminBuf = ''; adminOpen(); }
+  });
+  /* A phone has no keyboard, so the same console answers five quick taps on the
+     season clock -- deliberate enough that it never happens by accident. */
+  { let taps = 0, last = 0;
+    const el2 = $('season');
+    if (el2) el2.addEventListener('pointerdown', () => {
+      const now = performance.now();
+      taps = (now - last < 600) ? taps + 1 : 1;
+      last = now;
+      if (taps >= 5) { taps = 0; adminOpen(); }
+    }); }
   G.keys = keys;
 
   // ---- buttons ----
@@ -715,6 +735,7 @@ const PANEL_DEF = {
   raid: { t: 'Raids & Bosses', tabs: ['Raids', 'World Bosses'] },
   hof: { t: 'Hall of Fame', tabs: ['Top 100', 'Top 20 Clans', 'Ascendants', 'First Blood', 'Past Seasons'] },
   ach: { t: 'Achievements', tabs: ['Your Board', 'All 250', 'Leaders', 'The Testament'] },
+  admin: { t: 'Admin', tabs: ['You', 'Adventurers', 'Gear', 'Season'] },
   social: { t: 'Adventurers', tabs: ['Online', 'Whispers', 'Chat'] },
   opts: { t: 'Settings', tabs: ['Game', 'Graphics', 'Audio', 'About'] },
 };
@@ -748,6 +769,13 @@ function panelClose() {
   $('panel').classList.remove('on');
   document.querySelectorAll('#bar .mb').forEach(b => b.classList.remove('on'));
   hideTip();
+}
+/* True while a field in the open panel has focus. The frame loop's automatic repaint
+   has to hold off then, or it wipes what is being typed -- but an explicit render from
+   a button or a tab must still go through, which is why this is not inside renderPanel. */
+function typingInPanel() {
+  const ae = document.activeElement;
+  return !!(ae && ae.tagName === 'INPUT' && $('pbody').contains(ae));
 }
 function renderPanel() {
   if (!PANEL) return;
